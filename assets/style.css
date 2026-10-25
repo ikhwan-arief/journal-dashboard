@@ -1420,18 +1420,93 @@ dialog p {
   gap:6px 12px
 }
 .sdg-chip {
-  border:1px solid var(--green);
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--border);
+  border-left:4px solid var(--green);
   background:var(--tint);
   color:var(--forest);
-  border-radius:999px;
-  padding:4px 12px;
+  border-radius:8px;
+  padding:4px 10px 4px 4px;
   font:600 12px/1.4 inherit;
   cursor:pointer;
   text-align:left
 }
+.sdg-chip img {
+  width:28px;
+  height:28px;
+  flex-shrink:0
+}
 .sdg-score {
   font-size:11px;
   color:var(--muted)
+}
+/* Official UN goal list: full icon + a bar in the goal colour (colour definitions from the UN guidelines). */
+.sdg-bars {
+  list-style:none;
+  margin:0;
+  padding:0;
+  display:grid;
+  gap:6px
+}
+.sdg-bar {
+  display:grid;
+  grid-template-columns:40px 1fr 4.5em;
+  align-items:center;
+  gap:12px;
+  width:100%;
+  padding:4px 6px;
+  border:0;
+  border-radius:8px;
+  background:none;
+  font:inherit;
+  color:var(--ink);
+  text-align:left;
+  cursor:pointer
+}
+.sdg-bar:hover,.sdg-bar:focus-visible {
+  background:var(--tint-soft, #f0f4ec)
+}
+.sdg-bar:disabled {
+  cursor:default
+}
+.sdg-bar img {
+  display:block;
+  width:40px;
+  height:40px
+}
+.sdg-bar-label {
+  display:grid;
+  gap:4px;
+  min-width:0
+}
+.sdg-bar-name {
+  font-size:12px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.sdg-bar-track {
+  display:block;
+  height:10px;
+  border-radius:5px;
+  background:color-mix(in srgb, var(--border) 60%, #fff)
+}
+.sdg-bar-fill {
+  display:block;
+  height:100%;
+  border-radius:5px;
+  min-width:2px
+}
+.sdg-bar-count {
+  text-align:right;
+  font-weight:700;
+  font-size:13px;
+  font-variant-numeric:tabular-nums
+}
+.sdg-notice {
+  margin-top:10px
 }
 .citing-table {
   font-size:11px

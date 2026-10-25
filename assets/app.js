@@ -2,10 +2,11 @@
  * Licensed under the PolyForm Noncommercial License 1.0.0
  * (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
  * written permission from the copyright holder. See LICENSE and NOTICE. */
-import { MODULES, SDGS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS } from './metrics.js';
+import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS } from './metrics.js';
 import { renderImpactMetrics, renderJournalRecap, renderJournalHeader, renderAuthorHeader, renderJournalMetrics, renderJournalCitations, renderJournalTable, METRIC_TITLES, metricYear } from './journal-panel.js';
 import { EXPORT_CONTROLS, SHOW_AUDIT_TAB, CONTENT_PROTECTION } from './config.js';
-import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, downloadText, PALETTE, applyTheme } from './charts.js';
+import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
+const sdgColor = id => SDG_COLORS[Number(id) - 1] || PALETTE[0];
 const $ = id => document.getElementById(id), nf = new Intl.NumberFormat('en-US'), df = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const num = n => n === null || n === undefined ? 'Not available' : nf.format(n);
 const decimal = n => n === null || n === undefined ? 'Not available' : df.format(n);
@@ -607,12 +608,12 @@ function render() {
     else if (currentModule === 'sdgs') {
         intro(content, 'SDG labels come from a text classification model. One work can belong to several goals. Category counts must not be summed as unique works or read as evidence of measured social impact.');
         const all = Array.from({ length: 17 }, (_, i) => data.top.sdgs.find(r => r.id === String(i + 1)) || { id: String(i + 1), name: `SDG ${i + 1} · ${SDGS[i]}`, count: 0, years: {} });
-        const p = panel(grid, 'Portfolio across the 17 goals', 'Click a goal to explore its publications.', true);
-        p.body.style.height = '470px';
-        bar(p, all, { limit: 17, onClick: r => drill({ sdg: r.id }) });
-        smallMultiples(panel(grid, 'SDGs across years', 'Line charts for the 10 goals with the most works. Years that are zero for every goal shown are hidden, so the axis years may not be consecutive. Source data stays intact. The vertical scale is shared; one work can belong to several goals.', true), data.top.sdgs, years(), (r, y) => drill({ sdg: r.id, from: y, to: y }), { omitEmpty: true });
+        const p = panel(grid, 'Portfolio across the 17 goals', 'Official goal order 1–17, with the UN icon and colour of each goal. Click a goal to explore its publications.', true);
+        sdgBars(p, all, { limit: 17, onClick: r => drill({ sdg: r.id }) });
+        sdgNotice(p.node);
+        smallMultiples(panel(grid, 'SDGs across years', 'Line charts for the 10 goals with the most works. Years that are zero for every goal shown are hidden, so the axis years may not be consecutive. Source data stays intact. The vertical scale is shared; one work can belong to several goals.', true), data.top.sdgs, years(), (r, y) => drill({ sdg: r.id, from: y, to: y }), { omitEmpty: true, colorOf: r => sdgColor(r.id) });
         const fieldIds = data.top.fields.slice(0, 8).map(r => r.id);
-        scatter(panel(grid, 'SDGs and fields', 'X axis: SDG number; Y axis: the order of main fields listed below the chart.'), data.sdg_fields.filter(r => fieldIds.includes(r.field)).map(r => ({ ...r, name: `SDG ${r.sdg} · ${r.name}`, x: Number(r.sdg), y: fieldIds.indexOf(r.field) + 1 })), { x: 'x', y: 'y', xTitle: 'SDG number', yTitle: 'Main field order', bubble: true, onClick: r => drill({ sdg: r.sdg, field: r.field }) });
+        scatter(panel(grid, 'SDGs and fields', 'X axis: SDG number; Y axis: the order of main fields listed below the chart.'), data.sdg_fields.filter(r => fieldIds.includes(r.field)).map(r => ({ ...r, name: `SDG ${r.sdg} · ${r.name}`, x: Number(r.sdg), y: fieldIds.indexOf(r.field) + 1 })), { x: 'x', y: 'y', xTitle: 'SDG number', yTitle: 'Main field order', bubble: true, colorOf: r => sdgColor(r.sdg), onClick: r => drill({ sdg: r.sdg, field: r.field }) });
         grid.lastElementChild.append(el('p', { class: 'panel-note' }, data.top.fields.slice(0, 8).map((r, i) => `${i + 1}. ${r.name}`).join(' · ')));
         groupBar(grid, 'Identified study designs', 'designs', 'design', 'Automatic classification; categories can overlap.');
     }
@@ -684,8 +685,16 @@ function render() {
 // SDG card shared by journal and author pages: top 8 goals in the chart, the rest named in the note.
 function sdgCard(grid, title) {
     const goals = data.top.sdgs.filter(r => r.count > 0), others = goals.slice(8);
-    bar(panel(grid, title, `Unique works per goal; one work can belong to several goals. Automatic OpenAlex classification, not a measure of impact.${others.length ? ` Other goals: ${others.map(r => `SDG ${r.id} (${num(r.count)})`).join(', ')}.` : ''} Click a goal to narrow this page.`),
-        goals, { limit: 8, onClick: r => drill({ sdg: r.id }) });
+    const p = panel(grid, title, `Unique works per goal; one work can belong to several goals. Automatic OpenAlex classification, not a measure of impact.${others.length ? ` Other goals: ${others.map(r => `SDG ${r.id} (${num(r.count)})`).join(', ')}.` : ''} Click a goal to narrow this page.`);
+    sdgBars(p, goals, { limit: 8, onClick: r => drill({ sdg: r.id }) });
+    sdgNotice(p.node);
+}
+// UN attribution for the official icons and colours; the UN has not reviewed this dashboard.
+function sdgNotice(container) {
+    const note = el('p', { class: 'panel-note sdg-notice' }, 'SDG icons: United Nations, ');
+    note.append(external('un.org/sustainabledevelopment ↗', 'https://www.un.org/sustainabledevelopment/'),
+        document.createTextNode('. The content of this publication has not been approved by the United Nations and does not reflect the views of the United Nations or its officials or Member States.'));
+    container.append(note);
 }
 function timelineTrack(p, label) {
     const controls = el('div', { class: 'timeline-controls' });
@@ -956,12 +965,17 @@ function sdgSection(w) {
     else {
         const list = el('ul', { class: 'sdg-list' });
         for (const g of goals) {
-            const button = el('button', { type: 'button', class: 'sdg-chip', 'data-sdg': g.id, title: 'Show other works with this SDG' }, `SDG ${g.number} · ${g.name}`);
+            const button = el('button', { type: 'button', class: 'sdg-chip', 'data-sdg': g.id, title: 'Show other works with this SDG' });
+            // The official icon (whole, scaled) beside the name, with the goal colour as a left rule.
+            button.style.borderLeftColor = sdgColor(g.number);
+            button.append(el('img', { src: `assets/sdg/sdg-${g.number}.png`, alt: '', width: '28', height: '28', loading: 'lazy' }),
+                el('span', {}, `SDG ${g.number} · ${g.name}`));
             // Same drill as the SDG charts: keeps the journal page or author filter that is active.
             button.onclick = () => { $('detail-dialog').close(); drill({ sdg: g.id }); };
             const li = el('li'); li.append(button, el('span', { class: 'sdg-score' }, g.score === null ? 'score not available' : `confidence score ${decimal(g.score)}`)); list.append(li);
         }
         box.append(list);
+        sdgNotice(box);
     }
     const classifier = policy.classifier === 'openalex-2026-10' ? 'OpenAlex classifier (since October 2026)' : 'classifier version not recorded';
     box.append(el('p', { class: 'panel-note' }, `Source: OpenAlex, field ${policy.field || 'sustainable_development_goals'} · ${classifier}${policy.threshold ? ` · score threshold ${decimal(policy.threshold)}` : ''} · retrieved ${formatDate(policy.retrieved_at || manifest.updated_at)}${policy.scores === false || !w.sdg_scores ? ' · scores not stored in this snapshot' : ''}.`),

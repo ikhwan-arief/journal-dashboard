@@ -2,7 +2,7 @@
  * Licensed under the PolyForm Noncommercial License 1.0.0
  * (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
  * written permission from the copyright holder. See LICENSE and NOTICE. */
-import {csvCell, INSTITUTION} from './metrics.js';
+import {csvCell, INSTITUTION, SDG_COLORS} from './metrics.js';
 export const PALETTE = ['#28745B', '#B8934A', '#368C88', '#587AA5', '#8A7098', '#9BAE96', '#49705F', '#C4AB76', '#7F9DAD', '#B3A6B8'];
 export const OA_COLORS = { diamond: '#28745B', gold: '#B8934A', hybrid: '#587AA5', green: '#7DA286', bronze: '#A57D54', closed: '#ADB5AD', unknown: '#DBDFDA' };
 // Chrome colours of charts; applyTheme replaces them (and the palette) from manifest.institution.theme.
@@ -110,6 +110,27 @@ export function bar(p, rows, { horizontal = true, onClick, color, limit = 10, va
             e.native.target.style.cursor = elements.length && onClick ? 'pointer' : 'default'; } });
     accessible(p, rows.map(r => ({ ...r, count: r[value], description: `${r.name}: ${decimal.format(r[value] ?? 0)} ${unit}` })), onClick);
 }
+// SDG list with the official full icons (number, title and pictogram; scaled, never cropped) and goal-coloured bars.
+// rows: { id: '1'..'17', name, count }; the order is kept as given.
+export function sdgBars(p, rows, { onClick, limit = 17 } = {}) {
+    const list = rows.slice(0, limit), max = Math.max(1, ...list.map(r => r.count || 0));
+    p.body.style.height = 'auto';
+    if (!list.length || !list.some(r => r.count)) { empty(p); return; }
+    const box = el('ol', { class: 'sdg-bars' });
+    for (const r of list) {
+        const n = Number(r.id), item = el('li'), button = el('button', { type: 'button', class: 'sdg-bar', 'data-sdg': r.id, 'aria-label': `${r.name}: ${integer.format(r.count || 0)} works` });
+        button.append(el('img', { src: `assets/sdg/sdg-${n}.png`, alt: `SDG ${n}`, width: '40', height: '40', loading: 'lazy' }));
+        const track = el('span', { class: 'sdg-bar-track' }), fill = el('span', { class: 'sdg-bar-fill' }), label = el('span', { class: 'sdg-bar-label' });
+        fill.style.width = `${(r.count || 0) / max * 100}%`;
+        fill.style.background = SDG_COLORS[n - 1];
+        track.append(fill);
+        label.append(el('span', { class: 'sdg-bar-name' }, r.name), track);
+        button.append(label, el('span', { class: 'sdg-bar-count' }, integer.format(r.count || 0)));
+        if (onClick) button.onclick = () => onClick(r); else button.disabled = true;
+        item.append(button); box.append(item);
+    }
+    p.body.append(box);
+}
 export function line(p, rows, { onClick, value = 'count', label = 'Publications', color = PALETTE[0], percent = false, unit='works', reference = null, referenceLabel, tooltip, footer } = {}) {
     if (!rows.length || !rows.some(r => Number.isFinite(r[value]))) {
         empty(p);
@@ -169,8 +190,9 @@ export function smallMultiples(p, allRows, availableYears, onClick, options = {}
             if (!years.length) { body.append(el('p', { class: 'empty-state' }, 'No publications in this chart range.')); return; }
             const points = years.map(year => ({ year, count: row.years[year] || 0 }));
             const mini = { node: card, body, actions, title: row.name };
+            const lineColor = options.colorOf?.(row) || PALETTE[0];
             const c = chart(mini, 'line', { labels: years, datasets: [{ label: row.name, data: points.map(point => point.count),
-                borderColor: PALETTE[0], backgroundColor: '#28745B12', fill: true, tension: 0, pointRadius: 2.5, pointHoverRadius: 5, borderWidth: 2 }] }, {
+                borderColor: lineColor, backgroundColor: lineColor + '12', fill: true, tension: 0, pointRadius: 2.5, pointHoverRadius: 5, borderWidth: 2 }] }, {
                 scales: { x: { grid: { display: false }, ticks: { font: { size: 9 }, maxTicksLimit: 5 } },
                     y: { beginAtZero: true, max: Math.ceil(maximum * 1.1), ticks: { precision: 0, font: { size: 9 } }, grid: { color: CHART.grid } } },
                 plugins: { tooltip: { callbacks: { label: ctx => `${row.name}: ${integer.format(ctx.raw)} works in ${years[ctx.dataIndex]}` } } },
@@ -280,13 +302,13 @@ export function stacked(p, years, series, { percentage = false, horizontal = fal
         description: `${y.year} · ${s.name}: ${integer.format(y.values[s.id] || 0)} of ${integer.format(y.total)} works${percentage ? ' · ' + decimal.format(y.total ? (y.values[s.id] || 0) / y.total * 100 : 0) + '%' : ''}`,
         year: y, series: s }))), onClick ? r => onClick(r.year, r.series) : undefined);
 }
-export function scatter(p, rows, { x = 'count', y = 'citations', xTitle = 'Publications', yTitle = 'Citations', onClick, bubble = false } = {}) {
+export function scatter(p, rows, { x = 'count', y = 'citations', xTitle = 'Publications', yTitle = 'Citations', onClick, bubble = false, colorOf } = {}) {
     rows = rows.filter(r => Number.isFinite(r[x]) && Number.isFinite(r[y]));
     if (!rows.length) {
         empty(p);
         return;
     }
-    chart(p, bubble ? 'bubble' : 'scatter', { datasets: [{ label: p.title, data: rows.map(r => ({ x: r[x], y: r[y], r: Math.max(4, Math.min(20, Math.sqrt(r.count || 1) * 1.3)) })), backgroundColor: rows.map((r, i) => colorFor(r.id, i) + 'B3'), borderWidth: 1, borderColor: '#fff', pointRadius: 5 }] }, { scales: { x: { beginAtZero: true, title: { display: true, text: xTitle, font: { size: 10 } }, grid: { color: CHART.grid }, ticks: { font: { size: 9 } } }, y: { beginAtZero: true, title: { display: true, text: yTitle, font: { size: 10 } }, grid: { color: CHART.grid }, ticks: { font: { size: 9 } } } },
+    chart(p, bubble ? 'bubble' : 'scatter', { datasets: [{ label: p.title, data: rows.map(r => ({ x: r[x], y: r[y], r: Math.max(4, Math.min(20, Math.sqrt(r.count || 1) * 1.3)) })), backgroundColor: rows.map((r, i) => (colorOf?.(r) || colorFor(r.id, i)) + 'B3'), borderWidth: 1, borderColor: '#fff', pointRadius: 5 }] }, { scales: { x: { beginAtZero: true, title: { display: true, text: xTitle, font: { size: 10 } }, grid: { color: CHART.grid }, ticks: { font: { size: 9 } } }, y: { beginAtZero: true, title: { display: true, text: yTitle, font: { size: 10 } }, grid: { color: CHART.grid }, ticks: { font: { size: 9 } } } },
         plugins: { legend: { display: false }, tooltip: { backgroundColor: CHART.primary, callbacks: { label: ctx => `${rows[ctx.dataIndex].name || rows[ctx.dataIndex].title}: ${xTitle} ${decimal.format(ctx.parsed.x)}, ${yTitle} ${decimal.format(ctx.parsed.y)}` } } },
         onClick: (_e, e) => e[0] && onClick?.(rows[e[0].index]) });
     accessible(p, rows.slice(0, 50).map(r => ({ ...r, description: `${r.name || r.title}: ${xTitle} ${decimal.format(r[x])}; ${yTitle} ${decimal.format(r[y])}` })), onClick);

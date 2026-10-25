@@ -27,6 +27,10 @@ export const SDG_NAMES = ['No poverty', 'Zero hunger', 'Good health and well-bei
     'Industry, innovation and infrastructure', 'Reduced inequalities', 'Sustainable cities and communities',
     'Responsible consumption and production', 'Climate action', 'Life below water', 'Life on land',
     'Peace, justice and strong institutions', 'Partnerships for the goals'];
+// Official colour definitions per goal from the UN SDG communications material (goal 1 to 17).
+// https://www.un.org/sustainabledevelopment/news/communications-material/
+export const SDG_COLORS = ['#E5243B', '#DDA63A', '#4C9F38', '#C5192D', '#FF3A21', '#26BDE2', '#FCC30B', '#A21942',
+    '#FD6925', '#DD1367', '#FD9D24', '#BF8B2E', '#3F7E44', '#0A97D9', '#56C02B', '#00689D', '#19486A'];
 // Goals of one work, highest classifier score first, goal number as tie-breaker; scores stay null when unknown.
 export function workSdgs(work) {
     if (!Array.isArray(work.sdgs)) return null;

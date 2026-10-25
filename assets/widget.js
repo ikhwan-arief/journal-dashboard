@@ -9,6 +9,10 @@
 (() => {
     const script = document.currentScript, base = new URL('../', script ? script.src : location.href);
     const NS = 'http://www.w3.org/2000/svg';
+    // Official SDG colour definitions (UN communications material) and the icons served next to this widget.
+    const SDG_COLORS = ['#E5243B', '#DDA63A', '#4C9F38', '#C5192D', '#FF3A21', '#26BDE2', '#FCC30B', '#A21942',
+        '#FD6925', '#DD1367', '#FD9D24', '#BF8B2E', '#3F7E44', '#0A97D9', '#56C02B', '#00689D', '#19486A'];
+    const sdgInk = hex => { const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4); return 1.05 / (.2126 * r + .7152 * g + .0722 * b + .05) >= 4.5 ? '#fff' : '#000'; };
     const S = { locale: 'en-US', na: 'Not available', loading: 'Loading journal metrics…', failed: 'Journal metrics could not be loaded.',
         four_year: '4-year citation ratio', two_year: '2-year citation ratio', fwci: 'Journal FWCI', timeline: t => `${t} timeline`, timelineFwci: 'Journal FWCI timeline',
         metricYear: 'Metric year', running: ' (current)', reference: r => `Benchmark ${r}`, numbers: 'Show values', year: 'Year', value: 'Value', works: 'Works',
@@ -27,7 +31,7 @@
         countries: 'Contributor countries', countriesNote: 'A work can count for several countries', origin: 'Author affiliation',
         originNote: h => `Works with at least one ${h} author versus works without a ${h} affiliation`, home: h => `With ${h} affiliation`, external: h => `Without ${h} affiliation`,
         articles: 'Most cited articles', columns: ['Title', 'Year', 'Citations', 'Access', 'SDG'],
-        sdgCard: 'SDGs of journal works', sdgNote: 'Unique works per goal; a work can count for several goals. Automatic OpenAlex classification, not a measure of impact.', score: 'classifier confidence', noSdg: 'No SDG labels on this journal\'s works yet.', country: 'Country', moreGoals: n => `${n} more goals are listed in the values table.`, mapLoading: 'Loading map…', noCountries: 'No affiliation countries on this journal\'s works yet.',
+        sdgCard: 'SDGs of journal works', sdgIcons: 'SDG icons: United Nations,', sdgNote: 'Unique works per goal; a work can count for several goals. Automatic OpenAlex classification, not a measure of impact.', score: 'classifier confidence', noSdg: 'No SDG labels on this journal\'s works yet.', country: 'Country', moreGoals: n => `${n} more goals are listed in the values table.`, mapLoading: 'Loading map…', noCountries: 'No affiliation countries on this journal\'s works yet.',
         mapMissing: list => `Not on the map: ${list}.`, mapNote: 'Bubble size is proportional to the number of works; hover or tap to see values',
         sdgNames: ['No poverty', 'Zero hunger', 'Good health and well-being', 'Quality education', 'Gender equality', 'Clean water and sanitation', 'Affordable and clean energy', 'Decent work and economic growth', 'Industry, innovation and infrastructure', 'Reduced inequalities', 'Sustainable cities and communities', 'Responsible consumption and production', 'Climate action', 'Life below water', 'Life on land', 'Peace, justice and strong institutions', 'Partnerships for the goals'],
         footer: n => `Top ${n} works by citations. Indicators are computed from OpenAlex metadata (CC0); they are not official values of any index provider.` };
@@ -49,6 +53,7 @@
 .uam{position:relative}.uam-tip{position:absolute;z-index:20;pointer-events:none;background:rgba(17,24,39,.92);color:#fff;font-size:.8em;line-height:1.35;padding:5px 8px;border-radius:5px;white-space:nowrap;display:none}
 .uam-years th,.uam-years td{padding:4px 6px;font-size:.85em;text-align:right;white-space:nowrap}.uam-years th:first-child{text-align:left}
 .uam-wide{grid-column:1/-1}.uam-map{aspect-ratio:960/420;min-height:120px}.uam-map svg{height:auto}.uam-sdg{display:inline-block;min-width:1.7em;margin:1px 2px 1px 0;padding:0 5px;border:1px solid var(--uam-accent);border-radius:9px;font-size:.8em;text-align:center;color:var(--uam-accent)}
+.uam-sdg-list{display:grid;gap:5px;margin:6px 0}.uam-sdg-row{display:grid;grid-template-columns:32px 1fr 3.5em;gap:10px;align-items:center}.uam-sdg-row img{display:block;width:32px;height:32px}.uam-sdg-label{display:grid;gap:3px;min-width:0;font-size:.82em}.uam-sdg-label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uam-sdg-label b{display:block;height:8px;border-radius:4px;background:rgba(128,128,128,.18)}.uam-sdg-label i{display:block;height:100%;border-radius:4px;min-width:2px}
 .uam td.n,.uam th.n{text-align:right;white-space:nowrap}.uam-scroll{overflow-x:auto}.uam details{margin-top:6px;font-size:.85em}.uam summary{cursor:pointer}`;
     const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) v !== undefined && v !== null && n.setAttribute(k, v); n.append(...kids.filter(k => k !== null && k !== undefined)); return n; };
     // Hover/tap text lives in data-tip and is shown by the widget's own tooltip (instant, also on touch).
@@ -238,8 +243,16 @@
             card(S.access, S.accessNote, ...stackedChart(data.access.rows, data.access.names, { label: S.access, percent: true })));
         // SDG labels of the journal's works (unique works per goal); no citing-works data in the widget.
         const sdgRows = (data.sdgs || []).map(([n, count]) => [`SDG ${n} · ${S.sdgNames[n - 1]}`, count]);
-        // Top 8 goals in the chart keep the card level with its neighbour; every goal stays in the number table.
-        grid.append(card(S.sdgCard, S.sdgNote, ...(sdgRows.length ? [hbar(sdgRows.slice(0, 8), { label: S.sdgCard }), sdgRows.length > 8 ? el('p', { class: 'uam-note' }, S.moreGoals(sdgRows.length - 8)) : null,
+        // Top 8 goals with the official icon (whole, scaled) and a bar in the goal colour; every goal stays in the table.
+        const sdgList = () => { const top = (data.sdgs || []).slice(0, 8), max = Math.max(1, ...top.map(r => r[1])), list = el('div', { class: 'uam-sdg-list', role: 'list' });
+            for (const [n, count] of top) { const fill = el('i'); fill.style.width = `${count / max * 100}%`; fill.style.background = SDG_COLORS[n - 1];
+                list.append(el('div', { class: 'uam-sdg-row', role: 'listitem', 'data-tip': `SDG ${n} · ${S.sdgNames[n - 1]}: ${num(count)}${S.worksUnit}` },
+                    el('img', { src: new URL(`assets/sdg/sdg-${n}.png`, base).href, alt: `SDG ${n}`, width: '32', height: '32', loading: 'lazy' }),
+                    el('span', { class: 'uam-sdg-label' }, el('span', {}, `SDG ${n} · ${S.sdgNames[n - 1]}`), el('b', {}, fill)), el('strong', {}, num(count)))); }
+            return list; };
+        const sdgNotice = () => el('p', { class: 'uam-note' }, `${S.sdgIcons} `, el('a', { href: 'https://www.un.org/sustainabledevelopment/', target: '_blank', rel: 'noopener noreferrer' }, 'un.org/sustainabledevelopment'),
+            '. The content of this publication has not been approved by the United Nations and does not reflect the views of the United Nations or its officials or Member States.');
+        grid.append(card(S.sdgCard, S.sdgNote, ...(sdgRows.length ? [sdgList(), sdgRows.length > 8 ? el('p', { class: 'uam-note' }, S.moreGoals(sdgRows.length - 8)) : null, sdgNotice(),
             numbers(['SDG', S.works], sdgRows.map(([name, count]) => [name, num(count)]))] : [el('p', {}, S.noSdg)])));
         const o = data.origin, total = o.home + o.external, share = total ? o.home / total * 100 : 0, bar = svg('svg', { viewBox: `0 0 ${W} 26`, role: 'img', 'aria-label': S.origin });
         bar.append(svg('rect', { x: 0, y: 4, width: W * share / 100, height: 18, fill: 'var(--uam-accent)' }, `${S.home(h)}: ${num(o.home)}${S.worksUnit}`), svg('rect', { x: W * share / 100, y: 4, width: W * (1 - share / 100), height: 18, fill: 'currentColor', 'fill-opacity': .25 }, `${S.external(h)}: ${num(o.external)}${S.worksUnit}`));
@@ -253,7 +266,7 @@
         root.append(grid, el('h3', {}, S.articles));
         const table = el('table'), head = el('tr'), body = el('tbody');
         S.columns.forEach((h, i) => head.append(el('th', { class: i === 1 || i === 2 ? 'n' : '' }, h)));
-        const sdgCell = goals => el('td', {}, ...(goals || []).map(([n, score]) => el('span', { class: 'uam-sdg', 'data-tip': `SDG ${n} · ${S.sdgNames[n - 1]}${score === null || score === undefined ? '' : ` · ${S.score} ${df.format(score)}`}` }, String(n))));
+        const sdgCell = goals => el('td', {}, ...(goals || []).map(([n, score]) => el('span', { class: 'uam-sdg', style: `background:${SDG_COLORS[n - 1]};border-color:${SDG_COLORS[n - 1]};color:${sdgInk(SDG_COLORS[n - 1])}`, 'data-tip': `SDG ${n} · ${S.sdgNames[n - 1]}${score === null || score === undefined ? '' : ` · ${S.score} ${df.format(score)}`}` }, String(n))));
         for (const a of data.articles) {
             const url = safeURL(a.doi), title = url ? el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, a.title) : a.title;
             body.append(el('tr', {}, el('td', {}, title), el('td', { class: 'n' }, a.year ?? '—'), el('td', { class: 'n' }, num(a.citations)), el('td', {}, a.oa || '—'), sdgCell(a.sdgs)));
