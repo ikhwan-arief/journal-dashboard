@@ -197,23 +197,6 @@ export function journalWidgetData(journal, works, entities, manifest, dataset) {
         const annual = dated.filter(w => w.year === year);
         return [year, annual.length, ...names.map(name => annual.filter(w => key(w) === name).length)];
     });
-    // Ten-year window for the widget's timelines (empty years stay zero) and per-goal SDG series.
-    const span = Array.from({ length: 10 }, (_, i) => currentYear - 9 + i);
-    const byYear = new Map(span.map(year => [year, 0]));
-    for (const work of dated) if (byYear.has(work.year)) byYear.set(work.year, byYear.get(work.year) + 1);
-    const yearly = span.map(year => [year, byYear.get(year)]);
-    const goals = summary.top.sdgs.filter(r => /^(?:[1-9]|1[0-7])$/.test(r.id)).slice(0, 6).map(r => Number(r.id));
-    const goalYears = new Map(span.map(year => [year, goals.map(() => 0)]));
-    for (const work of dated) {
-        const counts = goalYears.get(work.year);
-        if (!counts) continue;
-        for (const goal of new Set(work.sdgs || [])) {
-            const index = goals.indexOf(Number(goal));
-            if (index >= 0) counts[index]++;
-        }
-    }
-    const funders = summary.top.funders.slice(0, 10).map(r => [r.name, r.count]);
-    const byId = new Map(works.map(work => [work.id, work]));
     const own = summary.top.journals.find(r => r.id === journal.id) || { count: 0, local: 0 };
     const row = r => ({ year: r.year, value: compact(r.value), numerator: compact(r.numerator), denominator: r.denominator,
         status: r.status, small_base: r.small_base, ...(r.total_documents !== undefined ? { total_documents: r.total_documents, coverage: compact(r.coverage, 2), window_incomplete: r.window_incomplete } : {}),
@@ -225,22 +208,14 @@ export function journalWidgetData(journal, works, entities, manifest, dataset) {
             fwci: compact(k.fwci), fwci_n: k.fwci_n, fwci_coverage: compact(k.fwci_coverage, 2), top10: k.top10, eligible: k.eligible },
         series: { four_year: journal.series.four_year.map(row), two_year: journal.series.two_year.map(row), fwci: journal.series.fwci.map(row) },
         citations: journal.citations,
-        yearly,
         types: { names: types, rows: perYear(w => w.type, types) },
         access: { names: statuses, rows: perYear(w => w.oa_status, statuses) },
         // [ISO code, name, works] for the widget's bubble map; the summary keeps the top 50 countries.
         countries: summary.top.countries.map(r => [r.id, r.name, r.count]),
         origin: { home: own.local, external: own.count - own.local },
-        funders,
-        sdg_series: { goals, rows: span.map(year => [year, ...goalYears.get(year)]) },
-        // Article rows for the widget's published-articles table and its detail popup.
-        articles: summary.publications.slice(0, 20).map(w => {
-            const work = byId.get(w.id) || {}, authors = (work.authors || []).map(a => entities.authors[a.id]?.name || a.name || a.id).filter(Boolean);
-            return { id: w.id, title: w.title, year: w.year, citations: w.citations, doi: w.doi || null, oa: w.oa_status,
-                type: work.type || null, fwci: validNumber(work.fwci) ? compact(work.fwci) : null,
-                authors: authors.slice(0, 8), author_count: authors.length,
-                sdgs: (workSdgs(work) || []).map(g => [g.number, g.score]) };
-        }),
+        // SDG labels per article ([goal, score|null], highest score first) and unique works per goal for the journal.
+        articles: summary.publications.slice(0, 20).map(w => ({ title: w.title, year: w.year, citations: w.citations, doi: w.doi || null, oa: w.oa_status,
+            sdgs: (workSdgs(works.find(x => x.id === w.id) || {}) || []).map(g => [g.number, g.score]) })),
         sdgs: summary.top.sdgs.filter(r => /^(?:[1-9]|1[0-7])$/.test(r.id)).map(r => [Number(r.id), r.count]),
         sdg_policy: { classifier: manifest.sdg?.classifier || 'unknown', scores: Boolean(manifest.sdg?.scores) } };
 }

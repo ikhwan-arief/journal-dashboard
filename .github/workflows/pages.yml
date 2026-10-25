@@ -48,7 +48,7 @@ jobs:
           if (f.citing?.entries) entries.push(...f.citing.entries);
           for (const entry of entries) {
             const source = path.resolve(root, entry.path);
-            if (entry.path.split('/').includes('..') || !source.startsWith(root + path.sep) || !fs.realpathSync(source).startsWith(root + path.sep) || !/^(assets\/|data\/|index\.html$|\.nojekyll$)/.test(entry.path) || !fs.lstatSync(source).isFile()) throw Error('Unsafe snapshot path');
+            if (entry.path.split('/').includes('..') || !source.startsWith(root + path.sep) || !fs.realpathSync(source).startsWith(root + path.sep) || !/^(assets\/|data\/|index\.html$|embed\.html$|\.nojekyll$)/.test(entry.path) || !fs.lstatSync(source).isFile()) throw Error('Unsafe snapshot path');
             const data = fs.readFileSync(source);
             if (data.length !== entry.bytes || crypto.createHash('sha256').update(data).digest('hex') !== entry.sha256) throw Error('Snapshot integrity mismatch');
             const target = path.join(output, entry.path);

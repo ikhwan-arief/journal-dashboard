@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Ikhwan Arief (ikhwan[at]eng.unand.ac.id). All rights reserved.
+     Licensed under the PolyForm Noncommercial License 1.0.0
+     (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
+     written permission from the copyright holder. See LICENSE and NOTICE. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Journal metrics widget for one journal, embedded by its OpenAlex source ID.">
+  <title>Journal metrics</title>
+  <style>
+    html, body { margin: 0; background: #fff; color: #1f2937; }
+    body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    .embed { padding: 8px 10px 16px; max-width: 100%; }
+    .embed-message { margin: 16px 10px; font-size: 14px; color: #6b7280; }
+    .embed-message[hidden] { display: none; }
+  </style>
+  <script src="assets/embed.js" defer></script>
+  <script src="assets/widget.js" defer></script>
+</head>
+<body>
+  <main id="journal" class="embed" aria-label="Journal metrics"></main>
+  <p id="embed-message" class="embed-message" hidden></p>
+</body>
+</html>
