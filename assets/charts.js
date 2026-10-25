@@ -400,8 +400,14 @@ export function network(p, data, onClick) {
         return;
     }
     p.body.classList.add('tall');
-    const svg = svgEl('svg', { viewBox: '0 0 800 350', role: 'img', 'aria-label': p.title, xmlns: NS });
-    const positions = new Map(nodes.map((n, i) => { const center = n.id === INSTITUTION.id, angle = i / nodes.length * Math.PI * 2; return [n.id, { x: center ? 400 : 400 + Math.cos(angle) * 285, y: center ? 175 : 175 + Math.sin(angle) * 130 }]; }));
+    // The viewBox follows the panel's real width, so a half-width panel keeps 9 px labels instead of scaling them down.
+    const width = Math.max(320, Math.round(p.body.clientWidth || p.node.clientWidth || 800));
+    const height = Math.max(260, Math.round(p.body.clientHeight || 340));
+    const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': p.title, xmlns: NS });
+    const cx = width / 2, cy = height / 2, rx = Math.max(70, width / 2 - 70), ry = Math.max(60, height / 2 - 55);
+    const positions = new Map(nodes.map((n, i) => { const center = n.id === INSTITUTION.id, angle = i / nodes.length * Math.PI * 2; return [n.id, { x: center ? cx : cx + Math.cos(angle) * rx, y: center ? cy : cy + Math.sin(angle) * ry, angle }]; }));
+    const maxLabels = width < 620 ? 8 : 12;
+    const labelIds = new Set([...nodes].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, maxLabels).map(n => n.id));
     const max = Math.max(...edges.map(e => e.count));
     for (const e of edges) {
         const a = positions.get(e.source), b = positions.get(e.target);
@@ -413,8 +419,13 @@ export function network(p, data, onClick) {
         const pos = positions.get(n.id), g = svgEl('g', { class: 'network-node', tabindex: 0, role: 'button', 'aria-label': `${n.name}: ${n.count}` });
         g.append(svgEl('circle', { cx: pos.x, cy: pos.y, r: Math.min(21, 5 + Math.sqrt(n.count || 1) / 3), fill: n.id === INSTITUTION.id ? CHART.primary : colorFor(n.id, i), stroke: '#fff', 'stroke-width': 2 }));
         g.append(svgEl('title', {}, `${n.name} · ${integer.format(n.count || 0)}`));
-        if (i < 12)
-            g.append(svgEl('text', { x: pos.x, y: pos.y + 29, 'text-anchor': 'middle', 'font-size': 9, fill: CHART.text, 'font-family': 'system-ui' }, n.name.length > 28 ? n.name.slice(0, 26) + '…' : n.name));
+        if (labelIds.has(n.id)) {
+            // Labels sit outside the ring and change anchor by side, so they do not pile up in one corner.
+            const cos = Math.cos(pos.angle), sin = Math.sin(pos.angle);
+            const anchor = cos > .3 ? 'start' : cos < -.3 ? 'end' : 'middle';
+            const text = n.name.length > (width < 620 ? 20 : 28) ? n.name.slice(0, width < 620 ? 18 : 26) + '…' : n.name;
+            g.append(svgEl('text', { x: pos.x + cos * 24, y: pos.y + sin * 24 + 3, 'text-anchor': anchor, 'font-size': 9, fill: CHART.text, 'font-family': 'system-ui' }, text));
+        }
         g.onclick = () => onClick?.(n);
         g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();

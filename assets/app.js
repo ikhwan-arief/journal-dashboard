@@ -43,7 +43,8 @@ function setInstitution() {
     const select = $('filter-scope');
     select.replaceChildren();
     for (const scope of ['all', 'affiliated', 'funded', 'published']) if (hasScope(scope))
-        option(select, scope, { all: 'All', affiliated: 'Affiliated', funded: `Funded by ${short}`, published: `Published by ${short}` }[scope]);
+        // Short labels keep the select readable when the organisation has a long name; the scope line spells it out.
+        option(select, scope, { all: 'All', affiliated: 'Affiliated', funded: 'Funded', published: 'Published' }[scope]);
 }
 let manifest, history = [], currentModule = 'overview', filter = {}, data, worker, requestID = 0, renderID = 0, tablePage = 0, tableSort = 'citations';
 let topicGroup = '', topicSubfield = '';
@@ -624,9 +625,10 @@ function render() {
     }
     else if (currentModule === 'funding') {
         intro(content, hasScope('funded') ? `Use the Scope option to tell all works funded by ${home()} apart from the funders of works affiliated with ${home()}. Missing funding metadata does not mean the research was unfunded.` : `OpenAlex lists no funder record for ${home()}, so this tab shows the funders recorded on works in the active scope. Missing funding metadata does not mean the research was unfunded.`);
+        // Recorded funders and the funder-topic network sit side by side; the yearly lines span the row below.
         groupBar(grid, 'Recorded funders', 'funders', 'funder');
+        network(panel(grid, 'Funders and research topics', 'Links show a funder and a topic on the same work.'), data.networks.funding, r => drill(r.id.startsWith('F') ? { funder: r.id } : { topic: r.id }));
         smallMultiples(panel(grid, 'Funding by year', 'Line charts for the 10 funders with the most publications in the active scope. Years that are zero for every funder shown are hidden, so the axis years may not be consecutive. Source data stays intact. The vertical scale is shared; one work can have several funders.', true), data.top.funders, years(), (r, y) => drill({ funder: r.id, from: y, to: y }), { omitEmpty: true });
-        network(panel(grid, 'Funders and research topics', 'Links show a funder and a topic on the same work.', true), data.networks.funding, r => drill(r.id.startsWith('F') ? { funder: r.id } : { topic: r.id }));
         minis(content, [['Works with a funder', num(data.total - data.quality.funder), 'Funding metadata completeness'], ['Awards identified', num(data.top.awards.length), 'At most 50 in the summary'], ['List APC known', num(k.apc_n), 'List price, not institutional spending'], ['OpenAPC payments', num(k.paid_verified), 'Articles with OpenAPC provenance']]);
         intro(content, `Mean known list APC: ${k.apc_mean === null ? 'Not available' : 'US$ ' + decimal(k.apc_mean)}. ${num(k.paid_fallback)} estimated payment records use provenance other than OpenAPC. These are not summed as actual ${home()} spending.`);
         entityTable(content, 'funders');
