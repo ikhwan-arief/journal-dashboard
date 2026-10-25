@@ -30,7 +30,7 @@
         impact: 'Journal citation impact', types: 'Work types by year', access: 'Access status by year', accessNote: 'Share of works per OA status',
         countries: 'Contributor countries', countriesNote: 'A work can count for several countries', origin: 'Author affiliation',
         originNote: h => `Works with at least one ${h} author versus works without a ${h} affiliation`, home: h => `With ${h} affiliation`, external: h => `Without ${h} affiliation`,
-        articles: 'Most cited articles', columns: ['Title', 'Year', 'Citations', 'Access', 'SDG'],
+        articles: 'Most cited articles', columns: ['Title', 'Year', 'Citations', 'SDG'],
         sdgCard: 'SDGs of journal works', sdgIcons: 'SDG icons: United Nations,', sdgNote: 'Unique works per goal; a work can count for several goals. Automatic OpenAlex classification, not a measure of impact.', score: 'classifier confidence', noSdg: 'No SDG labels on this journal\'s works yet.', country: 'Country', moreGoals: n => `${n} more goals are listed in the values table.`, mapLoading: 'Loading map…', noCountries: 'No affiliation countries on this journal\'s works yet.',
         mapMissing: list => `Not on the map: ${list}.`, mapNote: 'Bubble size is proportional to the number of works; hover or tap to see values',
         sdgNames: ['No poverty', 'Zero hunger', 'Good health and well-being', 'Quality education', 'Gender equality', 'Clean water and sanitation', 'Affordable and clean energy', 'Decent work and economic growth', 'Industry, innovation and infrastructure', 'Reduced inequalities', 'Sustainable cities and communities', 'Responsible consumption and production', 'Climate action', 'Life below water', 'Life on land', 'Peace, justice and strong institutions', 'Partnerships for the goals'],
@@ -269,7 +269,7 @@
         const sdgCell = goals => el('td', {}, ...(goals || []).map(([n, score]) => el('span', { class: 'uam-sdg', style: `background:${SDG_COLORS[n - 1]};border-color:${SDG_COLORS[n - 1]};color:${sdgInk(SDG_COLORS[n - 1])}`, 'data-tip': `SDG ${n} · ${S.sdgNames[n - 1]}${score === null || score === undefined ? '' : ` · ${S.score} ${df.format(score)}`}` }, String(n))));
         for (const a of data.articles) {
             const url = safeURL(a.doi), title = url ? el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, a.title) : a.title;
-            body.append(el('tr', {}, el('td', {}, title), el('td', { class: 'n' }, a.year ?? '—'), el('td', { class: 'n' }, num(a.citations)), el('td', {}, a.oa || '—'), sdgCell(a.sdgs)));
+            body.append(el('tr', {}, el('td', {}, title), el('td', { class: 'n' }, a.year ?? '—'), el('td', { class: 'n' }, num(a.citations)), sdgCell(a.sdgs)));
         }
         table.append(el('thead', {}, head), body);
         root.append(el('div', { class: 'uam-scroll' }, table), el('p', { class: 'uam-note' }, S.footer(num(data.articles.length))));
