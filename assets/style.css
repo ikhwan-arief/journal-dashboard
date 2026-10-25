@@ -207,6 +207,63 @@ th[aria-sort="descending"] .sort-button::after {
   font-size:28px;
   color:var(--forest)
 }
+.journal-embed-link {
+  margin-top:22px
+}
+.journal-install-intro,.journal-install-method>p:not(.panel-note) {
+  margin:4px 0 12px;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.6
+}
+.journal-install-method {
+  border-top:1px solid var(--line);
+  margin-top:16px;
+  padding-top:16px
+}
+.journal-install-method h3 {
+  color:var(--forest);
+  font-size:13px;
+  margin:0 0 4px
+}
+.journal-install-method label {
+  display:block;
+  color:var(--muted);
+  font-size:10px;
+  font-weight:650;
+  margin:10px 0 4px
+}
+.journal-embed-actions {
+  display:flex;
+  align-items:center;
+  gap:8px
+}
+.journal-embed-actions input {
+  flex:1;
+  min-width:0;
+  border:1px solid var(--border);
+  border-radius:7px;
+  background:var(--paper);
+  color:var(--ink);
+  font:12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;
+  padding:9px 10px
+}
+.journal-embed-status {
+  display:block;
+  min-height:18px;
+  margin:4px 0 2px;
+  color:var(--muted);
+  font-size:10px
+}
+@media(max-width:620px) {
+  .journal-embed-actions {
+    align-items:stretch;
+    flex-direction:column
+  }
+  .journal-embed-actions .button {
+    width:100%
+  }
+}
 .citation-year-table {
   margin-top:10px
 }

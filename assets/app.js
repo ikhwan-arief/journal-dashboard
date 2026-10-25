@@ -3,7 +3,7 @@
  * (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
  * written permission from the copyright holder. See LICENSE and NOTICE. */
 import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, filterQuery, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS } from './metrics.js';
-import { renderImpactMetrics, renderJournalRecap, renderJournalHeader, renderAuthorHeader, renderJournalMetrics, renderJournalCitations, renderJournalTable, METRIC_TITLES, metricYear } from './journal-panel.js';
+import { renderImpactMetrics, renderJournalRecap, renderJournalHeader, renderAuthorHeader, renderJournalMetrics, renderJournalCitations, renderJournalTable, journalEmbedURL, journalWidgetInstall, METRIC_TITLES, metricYear } from './journal-panel.js';
 import { EXPORT_CONTROLS, SHOW_AUDIT_TAB, CONTENT_PROTECTION } from './config.js';
 import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
 const sdgColor = id => SDG_COLORS[Number(id) - 1] || PALETTE[0];
@@ -691,6 +691,46 @@ function render() {
     if (!data.total)
         intro(content, 'No works match this combination of filters. Change the period or remove extra filters to widen the search.');
     if (currentModule === 'publications' || journal || author) pubTable(content);
+    if (journal && !filter.metricKind) renderJournalInstallation(content, journal);
+}
+// Last block on a journal profile: native widget and iframe are separate installation choices.
+function copyField(value, label) {
+    const row = el('div', { class: 'journal-embed-actions' });
+    const input = el('input', { type: 'text', readonly: '', value, 'aria-label': label, spellcheck: 'false' });
+    const copy = el('button', { class: 'button secondary', type: 'button' }, 'Copy');
+    const status = el('span', { class: 'journal-embed-status', role: 'status', 'aria-live': 'polite' });
+    copy.onclick = async () => {
+        input.focus();
+        input.select();
+        try {
+            await navigator.clipboard.writeText(url);
+            status.textContent = 'Copied.';
+        } catch {
+            status.textContent = 'Selected; copy it with Ctrl/Cmd+C.';
+        }
+    };
+    row.append(input, copy);
+    return [row, status];
+}
+function renderJournalInstallation(content, journal) {
+    const iframeURL = journalEmbedURL(manifest.institution.site_url, journal.id);
+    const widget = journalWidgetInstall(manifest.institution.site_url, journal.id);
+    if (!iframeURL || !widget) return;
+    const section = el('section', { class: 'panel journal-embed-link', 'aria-labelledby': 'journal-embed-title' });
+    const native = el('div', { class: 'journal-install-method' });
+    native.append(el('h3', {}, 'Option 1 · Native widget (without iframe)'),
+        el('p', {}, 'Add the script once through OJS Custom Header, then put the journal placeholder on its Static Page.'),
+        el('label', {}, 'Widget script URL'), ...copyField(widget.script_url, `Widget script URL for ${journal.name}`),
+        el('label', {}, 'Custom Header script tag'), ...copyField(widget.script_tag, `Widget script tag for ${journal.name}`),
+        el('label', {}, 'Static Page placeholder'), ...copyField(widget.placeholder, `Widget placeholder for ${journal.name}`));
+    const frame = el('div', { class: 'journal-install-method' });
+    frame.append(el('h3', {}, 'Option 2 · Iframe'),
+        el('p', {}, 'Use this address when OJS should display the same widget on an isolated white page. The journal ID is already included.'),
+        el('label', {}, 'Iframe URL'), ...copyField(iframeURL, `Iframe URL for ${journal.name}`),
+        el('p', { class: 'panel-note' }, external('Open iframe preview ↗', iframeURL)));
+    section.append(el('h2', { id: 'journal-embed-title' }, 'Embed this journal in OJS'),
+        el('p', { class: 'journal-install-intro' }, 'Choose one installation method. Do not install both methods on the same OJS page.'), native, frame);
+    content.append(section);
 }
 // SDG card shared by journal and author pages: top 8 goals in the chart, the rest named in the note.
 function sdgCard(grid, title) {

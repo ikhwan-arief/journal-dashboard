@@ -213,6 +213,39 @@ export function renderJournalHeader(container, dataset, journal, onBack) {
     container.append(header);
     return header;
 }
+// Public iframe address shown at the bottom of every journal profile. Keeping this pure makes the
+// site path, journal ID and encoded accent independently testable before the browser renders it.
+export function journalEmbedURL(siteURL, journalID, accent = '#0e6bbd') {
+    if (!/^S\d{1,15}$/i.test(journalID || '') || !/^#[0-9a-f]{6}$/i.test(accent || '')) return '';
+    try {
+        const base = new URL(siteURL);
+        if (!['http:', 'https:'].includes(base.protocol)) return '';
+        if (!base.pathname.endsWith('/')) base.pathname += '/';
+        const url = new URL('embed.html', base);
+        url.searchParams.set('journal', journalID.toUpperCase());
+        url.searchParams.set('accent', accent.toLowerCase());
+        return url.href;
+    } catch {
+        return '';
+    }
+}
+export function journalWidgetInstall(siteURL, journalID) {
+    if (!/^S\d{1,15}$/i.test(journalID || '')) return null;
+    try {
+        const base = new URL(siteURL);
+        if (!['http:', 'https:'].includes(base.protocol)) return null;
+        if (!base.pathname.endsWith('/')) base.pathname += '/';
+        const scriptURL = new URL('assets/widget.js', base).href, id = journalID.toUpperCase();
+        return {
+            script_url: scriptURL,
+            script_tag: `<script src="${scriptURL}" defer></script>`,
+            placeholder: `[journal-metrics ${id}]`,
+            html_mount: `<div data-journal-metrics="${id}"></div>`,
+        };
+    } catch {
+        return null;
+    }
+}
 // Author profile header: identity, roles on the works in this dashboard, and OpenAlex career figures kept apart.
 export function renderAuthorHeader(container, author, home, onBack) {
     // The page title already shows the author's name, so the header starts with identity links.
