@@ -2,7 +2,7 @@
  * Licensed under the PolyForm Noncommercial License 1.0.0
  * (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
  * written permission from the copyright holder. See LICENSE and NOTICE. */
-import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS } from './metrics.js';
+import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, filterQuery, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS } from './metrics.js';
 import { renderImpactMetrics, renderJournalRecap, renderJournalHeader, renderAuthorHeader, renderJournalMetrics, renderJournalCitations, renderJournalTable, METRIC_TITLES, metricYear } from './journal-panel.js';
 import { EXPORT_CONTROLS, SHOW_AUDIT_TAB, CONTENT_PROTECTION } from './config.js';
 import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
@@ -76,11 +76,21 @@ catch {
     return null;
 } }
 function external(label, url) { const safe = safeURL(url); return safe ? el('a', { href: safe, target: '_blank', rel: 'noopener noreferrer' }, label) : el('span', {}, label); }
-function setHash(module, next = filter) { const p = new URLSearchParams(); for (const [k, v] of Object.entries(next))
-    if (v !== '' && v !== null && v !== undefined)
-        p.set(k, v); const hash = module + (p.size ? '?' + p : '');
+function setHash(module, next = filter) {
+    // Only values that differ from the tab defaults go into the URL; a tab switch leaves a clean hash.
+    const query = filterQuery(next, moduleDefaults(module));
+    const hash = module + (query ? '?' + query : '');
     if (location.hash.slice(1) !== hash) $('content').setAttribute('aria-busy', 'true');
-    location.hash = hash; }
+    location.hash = hash;
+}
+// A navigation choice always starts from the tab's own defaults: no filter from the previous tab is carried over.
+function openTab(id) {
+    topicGroup = '';
+    topicSubfield = '';
+    const previousHash = location.hash;
+    setHash(id, moduleDefaults(id));
+    if (location.hash === previousHash) route();
+}
 const journalPage = () => currentModule === 'journals' && Boolean(filter.journal);
 const currentJournal = () => journalPage() ? journalDataset?.journals.find(j => j.id === filter.journal) : null;
 // Author profile page (#authors?author=A…): every work in the snapshot that lists the author.
@@ -1247,8 +1257,7 @@ async function init() {
     document.querySelector('.skip-link').onclick = event => {event.preventDefault();$('main').focus();$('main').scrollIntoView();};
     // Built after the manifest arrives: the Journals tab exists only when the institution has a publisher role.
     const buildNav = () => MODULES.forEach(([id, label, number], i) => { if (!moduleEnabled(id)) return; const a = el('a', { href: '#' + id, class: 'nav-link', 'data-module': id }); a.append(el('span', { class: 'nav-number', 'aria-hidden': 'true' }, icons[i]), el('span', {}, label)); a.onclick = e => { e.preventDefault(); if (!manifest)
-        return; document.querySelector('.sidebar').classList.remove('open'); $('menu-toggle').setAttribute('aria-expanded', 'false'); // Every tab opens clean: its own default filters, nothing carried over (same as Reset all filters).
-        topicGroup = ''; topicSubfield = ''; const previousHash = location.hash; setHash(id, moduleDefaults(id)); if (location.hash === previousHash) route(); }; $('navigation').append(a); });
+        return; document.querySelector('.sidebar').classList.remove('open'); $('menu-toggle').setAttribute('aria-expanded', 'false'); openTab(id); }; $('navigation').append(a); });
     $('filters-form').onsubmit = e => { e.preventDefault(); if (!manifest)
         return; const next = { ...filter }; delete next.metricKind; delete next.metricPart; for (const [k, v] of new FormData(e.currentTarget))
         next[k] = v; setHash(currentModule, next); };
@@ -1276,6 +1285,8 @@ async function init() {
             throw new Error('The snapshot is incomplete or its format is not supported.');
         setInstitution();
         buildNav();
+        // The brand returns to the overview with the same clean reset as a navigation choice.
+        document.querySelector('.brand').onclick = e => { e.preventDefault(); if (!manifest) return; openTab('overview'); };
         const age = (Date.now() - Date.parse(manifest.updated_at)) / 86400000;
         $('freshness').textContent = age > 10 ? 'Needs refresh' : 'Refreshed weekly';
         $('freshness').classList.toggle('stale', age > 10);

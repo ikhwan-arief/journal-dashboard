@@ -267,6 +267,19 @@ export function csvCell(value) {
     if (/^\s*[=+@-]/.test(text)) text = "'" + text;
     return '"' + text.replaceAll('"', '""') + '"';
 }
+// Query string for the address bar: a tab's own defaults are implied, so only real filter differences are written.
+// Switching tabs therefore leaves a clean URL (#publications), not one that still names the defaults.
+export function filterQuery(filter, defaults = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+        if (value === '' || value === null || value === undefined)
+            continue;
+        if (String(value) === String(defaults[key] ?? ''))
+            continue;
+        params.set(key, value);
+    }
+    return params.toString();
+}
 export function historyWeek(value) {
     const date = new Date(value.slice(0, 10) + 'T00:00:00Z');
     const day = date.getUTCDay() || 7;
