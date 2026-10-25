@@ -4,11 +4,11 @@
  * written permission from the copyright holder. See LICENSE and NOTICE. */
 /* Pure metric functions shared by the browser worker and snapshot builder. */
 export const MODULES = [
-    ['overview', 'Overview', '01'], ['publications', 'Publications', '02'],
-    ['authors', 'Authors', '03'], ['citations', 'Citation impact', '04'],
-    ['collaboration', 'Collaboration', '05'], ['topics', 'Fields & topics', '06'],
-    ['sdgs', 'SDGs', '07'], ['oa', 'Open access', '08'],
-    ['funding', 'Funding', '09'], ['journals', 'Journals', '10'],
+    ['overview', 'Overview', '01'], ['oa', 'Open access', '02'],
+    ['journals', 'Journals', '03'], ['authors', 'Authors', '04'],
+    ['citations', 'Citation impact', '05'], ['topics', 'Fields & topics', '06'],
+    ['sdgs', 'SDGs', '07'], ['collaboration', 'Collaboration', '08'],
+    ['publications', 'Publications', '09'], ['funding', 'Funding', '10'],
     ['repositories', 'Repositories', '11'], ['audit', 'Audit & methodology', '12'],
 ];
 // The configured institution (manifest.institution); build, worker and page call configureInstitution() first.
