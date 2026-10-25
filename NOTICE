@@ -1,0 +1,40 @@
+Research publication dashboard (OpenAlex)
+Copyright (c) 2026 Ikhwan Arief (ikhwan[at]eng.unand.ac.id). All rights reserved.
+
+Required Notice: Copyright (c) 2026 Ikhwan Arief (ikhwan[at]eng.unand.ac.id)
+
+LICENSE
+
+The software (source code, scripts, stylesheets, page templates, the embeddable widget and their
+documentation) is licensed under the PolyForm Noncommercial License 1.0.0. The full terms are in
+the LICENSE file and at https://polyformproject.org/licenses/noncommercial/1.0.0.
+
+In short, and subject to the full terms: you may use, copy and change the software only for
+noncommercial purposes, and anyone who receives a copy from you must also receive the license
+terms and this Required Notice.
+
+COMMERCIAL RIGHTS RESERVED
+
+All commercial rights in the software are reserved exclusively to the copyright holder. Any
+commercial use, including selling or licensing the software or a modified version, offering it
+or a modified version as a paid or revenue-generating service, or including it in a commercial
+product or service, requires the prior written permission of the copyright holder. Requests:
+ikhwan[at]eng.unand.ac.id.
+
+THIRD-PARTY MATERIAL
+
+The following parts are not covered by the license above and keep their own terms:
+
+- Chart.js 4.4.1 (chart.umd.min.js): MIT License; the license text is in Chart.js.LICENSE.md
+  next to it.
+- World map geometry derived from Natural Earth (world-map.json, world-map-lite.json): public
+  domain.
+- Publication metadata (the data files): from OpenAlex, CC0 1.0. Rights to the works it
+  describes belong to their respective holders.
+- Institution logos: the property of the institution, used under the license stated in the
+  logo attribution below or recorded with the logo file.
+
+NO WARRANTY
+
+The software is provided as is, without any warranty, as set out in the license. The dashboard is
+an independent analysis of public metadata and is not an official statistic of any institution.

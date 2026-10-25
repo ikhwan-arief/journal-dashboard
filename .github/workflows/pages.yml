@@ -1,0 +1,66 @@
+# Copyright (c) 2026 Ikhwan Arief (ikhwan[at]eng.unand.ac.id). All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0
+# (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
+# written permission from the copyright holder. See LICENSE and NOTICE.
+name: Publish static dashboard
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify and stage only static snapshot files
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const root = process.cwd(), output = path.join(root, '_site');
+          const manifest = JSON.parse(fs.readFileSync('data/manifest.json'));
+          if (manifest.complete !== true || manifest.schema_version !== 1) throw Error('Incomplete snapshot');
+          const f = manifest.files;
+          const entries = [f.entities, f.history, ...Object.values(f.overviews), ...f.works, ...manifest.assets];
+          if (f.journal_metrics) entries.push(f.journal_metrics);
+          else if (manifest.metric_policies?.journal_citation_ratios) throw Error('Required journal metrics missing');
+          if (f.journal_widgets) entries.push(...f.journal_widgets);
+          if (f.citing?.entries) entries.push(...f.citing.entries);
+          for (const entry of entries) {
+            const source = path.resolve(root, entry.path);
+            if (entry.path.split('/').includes('..') || !source.startsWith(root + path.sep) || !fs.realpathSync(source).startsWith(root + path.sep) || !/^(assets\/|data\/|index\.html$|\.nojekyll$)/.test(entry.path) || !fs.lstatSync(source).isFile()) throw Error('Unsafe snapshot path');
+            const data = fs.readFileSync(source);
+            if (data.length !== entry.bytes || crypto.createHash('sha256').update(data).digest('hex') !== entry.sha256) throw Error('Snapshot integrity mismatch');
+            const target = path.join(output, entry.path);
+            fs.mkdirSync(path.dirname(target), {recursive: true});
+            fs.writeFileSync(target, data);
+          }
+          fs.copyFileSync('data/manifest.json', path.join(output, 'data/manifest.json'));
+          JS
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+          retention-days: 1
+      - name: Publish validated snapshot
+        id: deployment
+        uses: actions/deploy-pages@v4
