@@ -1,6 +1,6 @@
 # Research publication dashboard: Universitas Andalas
 
-**[Open the dashboard](https://ikhwan-arief.github.io/ror-journal-dashboard/)**. No account is needed.
+**[Open the dashboard](https://ikhwan-arief.github.io/journal-dashboard/)**. No account is needed.
 
 The dashboard presents the journals of Universitas Andalas — their articles, citation impact, collaboration, topics, SDGs and openness — from public OpenAlex metadata. The snapshot is refreshed weekly; the date of the current snapshot is shown on the dashboard and in `data/manifest.json`. If a refresh fails, the last good version stays online.
 
