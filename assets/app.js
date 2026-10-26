@@ -655,7 +655,7 @@ function render() {
         sdgCard(grid, 'SDGs of journal works');
         const own = data.top.journals.find(r => r.id === journal.id) || { count: 0, local: 0 };
         donut(panel(grid, 'Author affiliation origin', `This journal's works with at least one ${home()} authorship versus works without a ${home()} affiliation.`),
-            data.total ? [{ id: 'yes', name: `With ${home()} affiliation`, count: own.local }, { id: 'no', name: `Without ${home()} affiliation`, count: own.count - own.local }] : [], r => drill({ local: r.id }));
+            data.total ? [{ id: 'yes', name: `With ${home()} affiliation`, count: own.local, color: '#0072B2' }, { id: 'no', name: `Without ${home()} affiliation`, count: own.count - own.local, color: '#D55E00' }] : [], r => drill({ local: r.id }));
         // Contributor countries as a full-width bubble map at the bottom, home country included.
         collaborationMap(grid, { title: 'Contributor countries', includeHome: true, unit: 'works',
             note: `Every author affiliation country on this journal's works, including ${homeCountry()}. Bubble area is proportional to the number of works; one work can count for several countries. Hover, focus or tap a bubble to see its count.` });

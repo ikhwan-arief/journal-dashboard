@@ -52,7 +52,7 @@
 .uam table{width:100%;border-collapse:collapse;font-size:.92em}.uam th,.uam td{padding:6px 8px;border-bottom:1px solid rgba(128,128,128,.25);text-align:left;vertical-align:top}
 .uam{position:relative}.uam-tip{position:absolute;z-index:20;pointer-events:none;background:rgba(17,24,39,.92);color:#fff;font-size:.8em;line-height:1.35;padding:5px 8px;border-radius:5px;white-space:nowrap;display:none}
 .uam-years th,.uam-years td{padding:4px 6px;font-size:.85em;text-align:right;white-space:nowrap}.uam-years th:first-child{text-align:left}
-.uam-wide{grid-column:1/-1}.uam-map{aspect-ratio:960/420;min-height:120px}.uam-map svg{height:auto}.uam-sdg{display:inline-block;min-width:1.7em;margin:1px 2px 1px 0;padding:0 5px;border:1px solid var(--uam-accent);border-radius:9px;font-size:.8em;text-align:center;color:var(--uam-accent)}
+.uam-wide{grid-column:1/-1}.uam-map{aspect-ratio:960/420;min-height:120px}.uam-map svg{height:auto}.uam .uam-origin-donut{display:block;width:180px;max-width:100%;margin:0 auto}.uam-sdg{display:inline-block;min-width:1.7em;margin:1px 2px 1px 0;padding:0 5px;border:1px solid var(--uam-accent);border-radius:9px;font-size:.8em;text-align:center;color:var(--uam-accent)}
 .uam-sdg-list{display:grid;gap:5px;margin:6px 0}.uam-sdg-row{display:grid;grid-template-columns:32px 1fr 3.5em;gap:10px;align-items:center}.uam-sdg-row img{display:block;width:32px;height:32px}.uam-sdg-label{display:grid;gap:3px;min-width:0;font-size:.82em}.uam-sdg-label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uam-sdg-label b{display:block;height:8px;border-radius:4px;background:rgba(128,128,128,.18)}.uam-sdg-label i{display:block;height:100%;border-radius:4px;min-width:2px}
 .uam td.n,.uam th.n{text-align:right;white-space:nowrap}.uam-scroll{overflow-x:auto}.uam details{margin-top:6px;font-size:.85em}.uam summary{cursor:pointer}`;
     const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) v !== undefined && v !== null && n.setAttribute(k, v); n.append(...kids.filter(k => k !== null && k !== undefined)); return n; };
@@ -60,6 +60,7 @@
     const svg = (tag, attrs = {}, tip) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (tip) n.setAttribute('data-tip', tip); return n; };
     const safeURL = url => { try { const u = new URL(url); return ['http:', 'https:'].includes(u.protocol) ? u.href : null; } catch { return null; } };
     const range = (a, b) => a === b ? String(a) : `${a}–${b}`;
+    const originColors = ['#0072B2', '#D55E00'];
 
     // Charts are plain SVG with native tooltips; tables of numbers sit in a collapsed <details>.
     // Charts are drawn at the card's real width (1 unit = 1 px), so labels stay small instead of scaling up.
@@ -177,6 +178,32 @@
         rows.forEach(([year, value]) => { head.append(el('th', {}, year)); values.append(el('td', { 'data-uam-year': String(year).replace('*', '') }, value)); });
         return el('div', { class: 'uam-scroll' }, el('table', { class: 'uam-years' }, el('tbody', {}, head, values))); };
     const card = (title, note, ...body) => el('div', { class: 'uam-card' }, el('h4', {}, title), note ? el('p', { class: 'uam-note' }, note) : null, ...body);
+    function originDonut(home, external, homeName) {
+        const total = home + external, homeShare = total ? home / total * 100 : 0, radius = 54, circumference = 2 * Math.PI * radius;
+        const s = svg('svg', { viewBox: '0 0 180 160', class: 'uam-origin-donut', role: 'img',
+            'aria-label': `${S.origin}: ${homeName} ${num(home)} (${pct(homeShare)}); ${S.external(homeName)} ${num(external)} (${pct(total ? 100 - homeShare : null)})` });
+        const values = [home, external];
+        let offset = 0;
+        values.forEach((value, i) => {
+            if (value > 0 && total) {
+                const length = circumference * value / total, gap = home > 0 && external > 0 ? 3 : 0;
+                s.append(svg('circle', { cx: 90, cy: 78, r: radius, fill: 'none', stroke: originColors[i], 'stroke-width': 24,
+                    'stroke-dasharray': `${Math.max(0, length - gap)} ${circumference - Math.max(0, length - gap)}`,
+                    'stroke-dashoffset': -offset, transform: 'rotate(-90 90 78)', 'data-origin': i === 0 ? 'home' : 'external',
+                    'data-tip': `${i === 0 ? S.home(homeName) : S.external(homeName)}: ${num(value)}${S.worksUnit} (${pct(value / total * 100)})` }));
+            }
+            offset += circumference * value / (total || 1);
+        });
+        if (!total) s.append(svg('circle', { cx: 90, cy: 78, r: radius, fill: 'none', stroke: 'currentColor', 'stroke-opacity': .2, 'stroke-width': 24 }));
+        s.append(Object.assign(svg('text', { x: 90, y: 84, 'text-anchor': 'middle', 'font-size': 20, 'font-weight': 700 }), { textContent: pct(homeShare) }));
+        const legend = el('div', { class: 'uam-legend' });
+        [S.home(homeName), S.external(homeName)].forEach((name, i) => {
+            const swatch = el('i');
+            swatch.style.background = originColors[i];
+            legend.append(el('span', {}, swatch, name));
+        });
+        return [s, legend];
+    }
 
     function metricSection(data, host, year, mount) {
         const pick = kind => data.series[kind].find(r => r.year === year), box = el('div');
@@ -254,9 +281,8 @@
             '. The content of this publication has not been approved by the United Nations and does not reflect the views of the United Nations or its officials or Member States.');
         grid.append(card(S.sdgCard, S.sdgNote, ...(sdgRows.length ? [sdgList(), sdgRows.length > 8 ? el('p', { class: 'uam-note' }, S.moreGoals(sdgRows.length - 8)) : null, sdgNotice(),
             numbers(['SDG', S.works], sdgRows.map(([name, count]) => [name, num(count)]))] : [el('p', {}, S.noSdg)])));
-        const o = data.origin, total = o.home + o.external, share = total ? o.home / total * 100 : 0, bar = svg('svg', { viewBox: `0 0 ${W} 26`, role: 'img', 'aria-label': S.origin });
-        bar.append(svg('rect', { x: 0, y: 4, width: W * share / 100, height: 18, fill: 'var(--uam-accent)' }, `${S.home(h)}: ${num(o.home)}${S.worksUnit}`), svg('rect', { x: W * share / 100, y: 4, width: W * (1 - share / 100), height: 18, fill: 'currentColor', 'fill-opacity': .25 }, `${S.external(h)}: ${num(o.external)}${S.worksUnit}`));
-        grid.append(card(S.origin, S.originNote(h), bar,
+        const o = data.origin, total = o.home + o.external, share = total ? o.home / total * 100 : 0;
+        grid.append(card(S.origin, S.originNote(h), ...originDonut(o.home, o.external, h),
             el('dl', {}, el('dt', {}, S.home(h)), el('dd', {}, `${num(o.home)} (${pct(share)})`), el('dt', {}, S.external(h)), el('dd', {}, `${num(o.external)} (${pct(total ? 100 - share : null)})`))));
         // Contributor countries as a full-width bubble map at the bottom (bubble area ∝ works).
         const mapCard = card(S.countries, S.countriesNote);

@@ -279,7 +279,7 @@ export function donut(p, rows, onClick) {
         return;
     }
     const total = rows.reduce((n, r) => n + r.count, 0);
-    chart(p, 'doughnut', { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => r.count), backgroundColor: rows.map((r, i) => colorFor(r.id, i)), borderColor: '#fff', borderWidth: 3 }] }, { cutout: '72%', scales: {}, plugins: { legend: { display: true, position: 'right', labels: { boxWidth: 9, boxHeight: 9, usePointStyle: true, padding: 14, font: { size: 10 } } }, tooltip: { backgroundColor: CHART.primary, padding: 10, callbacks: { label: c => `${c.label}: ${integer.format(c.raw)} works / ${integer.format(total)} (${decimal.format(total ? c.raw / total * 100 : 0)}%)` } } }, onClick: (_e, e) => e[0] && onClick?.(rows[e[0].index]) });
+    chart(p, 'doughnut', { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => r.count), backgroundColor: rows.map((r, i) => r.color || colorFor(r.id, i)), borderColor: '#fff', borderWidth: 3 }] }, { cutout: '72%', scales: {}, plugins: { legend: { display: true, position: 'right', labels: { boxWidth: 9, boxHeight: 9, usePointStyle: true, padding: 14, font: { size: 10 } } }, tooltip: { backgroundColor: CHART.primary, padding: 10, callbacks: { label: c => `${c.label}: ${integer.format(c.raw)} works / ${integer.format(total)} (${decimal.format(total ? c.raw / total * 100 : 0)}%)` } } }, onClick: (_e, e) => e[0] && onClick?.(rows[e[0].index]) });
     accessible(p, rows, onClick);
 }
 export function stacked(p, years, series, { percentage = false, horizontal = false, onClick } = {}) {
