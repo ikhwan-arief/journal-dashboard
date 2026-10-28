@@ -35,13 +35,15 @@
         mapMissing: list => `Not on the map: ${list}.`, mapNote: 'Bubble size is proportional to the number of works; hover or tap to see values',
         sdgNames: ['No poverty', 'Zero hunger', 'Good health and well-being', 'Quality education', 'Gender equality', 'Clean water and sanitation', 'Affordable and clean energy', 'Decent work and economic growth', 'Industry, innovation and infrastructure', 'Reduced inequalities', 'Sustainable cities and communities', 'Responsible consumption and production', 'Climate action', 'Life below water', 'Life on land', 'Peace, justice and strong institutions', 'Partnerships for the goals'],
         distTitle: 'Spread across works', distFwci: 'FWCI distribution by publication year', distCitations: 'Citations per work by publication year',
-        distFwciNote: (min) => `Spread of FWCI scores of the journal's works per publication year. A few highly cited works can lift the mean; the median and box show where most works are. Years with fewer than ${min} works are left out.`,
-        distCitationsNote: (min) => `Cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower. Years with fewer than ${min} works are left out.`,
+        distFwciNote: (min) => `Spread of FWCI scores of the journal's works per publication year. A few highly cited works can lift the mean; the median and box show where most works are. Years with fewer than ${min} works show one dot per work.`,
+        distCitationsNote: (min) => `Cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower. Years with fewer than ${min} works show one dot per work.`,
         distTip: (y, d) => `${y} · median ${dec(d.median)} · mean ${dec(d.mean)} · P25–P75 ${dec(d.q1)}–${dec(d.q3)} · P10–P90 ${dec(d.p10)}–${dec(d.p90)} · max ${dec(d.max)} · ${num(d.n)} works${d.small ? ' · small base' : ''}`,
         storyTitle: 'How to read this chart',
         originTitle: 'Author affiliation', allYears: n => `All years · ${n} authorships`, authorships: ' authorships',
         originGroups: (h, country) => [`${h.endsWith('s') ? h + "'" : h + "'s"} authors`, `Other authors from ${country}`, 'International authors', 'Affiliation not recorded'],
         originGroupNote: (h, country) => `Each author of each work counts once, in one group: ${h} first, then another institution in ${country}, then an institution abroad (all countries together). Authors without an affiliation or country in OpenAlex are shown as not recorded.`,
+        fewTip: (y, pts) => `${y} · ${pts.length} works, too few for a distribution; each dot is one work · values ${pts.map(dec).join(', ')}`,
+        fewValues: v => `each work: ${v}`, legFew: n => `Dot: one work (years under ${n} works)`,
         distHead: ['Year', 'Works', 'P10', 'P25', 'Median', 'P75', 'P90', 'Max', 'Mean'],
         legBox: 'Middle 50% (P25–P75)', legWhisker: 'Middle 80% (P10–P90)', legOuter: 'Middle 80% (P10–P90)', legMedian: 'Median', legMean: 'Mean', legMax: 'Maximum (▲ above axis)', legSmall: n => `Lighter: small base (under ${n} works)`, legHollow: n => `Hollow point: small base (under ${n} works)`, legRef: 'FWCI 1 benchmark',
         footer: n => `Top ${n} works by citations. Indicators are computed from OpenAlex metadata (CC0); they are not official values of any index provider.` };
@@ -122,35 +124,56 @@
     const storyBox = lines => lines?.length ? el('div', { class: 'uam-story' }, el('strong', {}, S.storyTitle),
         el('ul', {}, ...lines.map(line => { const [head, ...rest] = line.split(': '); return rest.length && head.length < 40 ? el('li', {}, el('b', {}, head + ': '), rest.join(': ')) : el('li', {}, line); }))) : null;
     const distRows = rows => (rows || []).map(([year, n, p10, q1, median, q3, p90, max, mean, small]) => ({ year, n, p10, q1, median, q3, p90, max, mean, small: Boolean(small) }));
-    // One slot per year from the first to the last shown year, so missing years stay visible as gaps.
-    const yearSlots = rows => { const by = new Map(rows.map(r => [r.year, r])), a = rows[0].year, b = rows.at(-1).year; return Array.from({ length: b - a + 1 }, (_, i) => ({ year: a + i, d: by.get(a + i) || null })); };
+    // Box rows and few-work rows ([year, [values]]) merged into one slot per year from the first to the last year;
+    // years without works stay visible as gaps. A slot has `d` (summary), `pts` (one value per work) or neither.
+    const yearSlots = (rows, few = []) => {
+        const by = new Map(rows.map(r => [r.year, { d: r }])); for (const [year, pts] of few) by.set(year, { pts });
+        const years = [...by.keys()].sort((x, z) => x - z), a = years[0], b = years.at(-1);
+        return Array.from({ length: b - a + 1 }, (_, i) => ({ year: a + i, d: by.get(a + i)?.d || null, pts: by.get(a + i)?.pts || null }));
+    };
     const niceTop = v => { const m = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil(v / m * 2) / 2 * m; };
+    // Axis top: a little above the highest P90 and the P90 of the dots, so one extreme work does not flatten the chart.
+    const slotTop = (slots, reference = 0) => { const pooled = slots.flatMap(r => r.pts || []).sort((x, z) => x - z);
+        const top = Math.max(...slots.filter(r => r.d).map(r => r.d.p90), pooled.length ? pooled[Math.floor((pooled.length - 1) * .9)] : 0, reference ?? 0);
+        // When nearly every value is 0, fall back to the largest value (at least 1) so the axis does not collapse.
+        return niceTop((top > 0 ? top : Math.max(1, pooled.at(-1) || 0, ...slots.filter(r => r.d).map(r => r.d.max))) * 1.15); };
+    // One dot per work; equal values sit side by side; a value above the axis is a triangle at the top.
+    function dots(s, x, pts, y, maxY) {
+        const placed = [];
+        for (const v of pts) {
+            const above = v > maxY, cy = above ? T + 2 : y(v), same = placed.filter(q => Math.abs(q - cy) < 5).length, cx = x + (same % 2 ? 1 : -1) * Math.ceil(same / 2) * 6;
+            placed.push(cy);
+            s.append(above ? svg('path', { d: `M${cx},${T - 2}l3.5,6h-7z`, fill: DIST.inner }) : svg('circle', { cx, cy, r: 3, fill: DIST.inner, stroke: '#fff', 'stroke-width': 1 }));
+        }
+    }
+    const slotTip = ({ year, d, pts }) => d ? S.distTip(year, d) : pts ? S.fewTip(year, pts) : `${year}: ${S.na}`;
     function distLegend(items) {
         const legend = el('div', { class: 'uam-legend' });
         for (const [style, label] of items) { const box = el('i'); box.setAttribute('style', style); legend.append(el('span', {}, box, label)); }
         return legend;
     }
-    function boxChart(rows, { label, reference = null }) {
-        const slots = yearSlots(rows), maxY = niceTop(Math.max(...rows.map(r => r.p90), reference ?? 0) * 1.15);
+    function boxChart(slots, { label, reference = null }) {
+        const maxY = slotTop(slots, reference);
         const s = frame(label, maxY), slot = (W - L - R) / slots.length, y = v => T + (H - T - B) * (1 - Math.min(v, maxY) / maxY), half = Math.min(slot * .32, 14);
         if (reference !== null) s.append(svg('line', { x1: L, x2: W - R, y1: y(reference), y2: y(reference), stroke: 'currentColor', 'stroke-dasharray': '4 3', 'stroke-opacity': .55 }));
-        slots.forEach(({ year, d }, i) => {
-            if (!d) return;
+        slots.forEach(({ d, pts }, i) => {
             const x = L + slot * (i + .5), tick = half * .6;
+            if (pts) { dots(s, x, pts, y, maxY); return; }
+            if (!d) return;
             s.append(svg('path', { d: `M${x},${y(d.q3)}V${y(d.p90)}M${x - tick},${y(d.p90)}H${x + tick}M${x},${y(d.q1)}V${y(d.p10)}M${x - tick},${y(d.p10)}H${x + tick}`, stroke: DIST.outer, 'stroke-width': 1.6, fill: 'none' }));
             s.append(svg('rect', { x: x - half, y: y(d.q3), width: half * 2, height: Math.max(y(d.q1) - y(d.q3), 1.5), rx: 1.5, fill: DIST.inner, 'fill-opacity': d.small ? .14 : .32, stroke: DIST.inner, 'stroke-width': 1.2, 'stroke-dasharray': d.small ? '3 2' : null }));
             s.append(svg('line', { x1: x - half, x2: x + half, y1: y(d.median), y2: y(d.median), stroke: 'currentColor', 'stroke-width': 2.5 }));
             if (d.mean <= maxY) { const m = y(d.mean); s.append(svg('path', { d: `M${x},${m - 4}L${x + 4},${m}L${x},${m + 4}L${x - 4},${m}Z`, fill: DIST.mean })); }
             s.append(d.max > maxY ? svg('path', { d: `M${x},${T - 2}l3.5,6h-7z`, fill: 'currentColor', 'fill-opacity': .55 }) : svg('circle', { cx: x, cy: y(d.max), r: 2.2, fill: 'currentColor', 'fill-opacity': .55 }));
         });
-        slots.forEach(({ year, d }, i) => s.append(svg('rect', { x: L + slot * i, y: T, width: slot, height: H - T - B, fill: 'transparent', class: 'uam-hit' }, d ? S.distTip(year, d) : `${year}: ${S.na}`)));
+        slots.forEach((r, i) => s.append(svg('rect', { x: L + slot * i, y: T, width: slot, height: H - T - B, fill: 'transparent', class: 'uam-hit' }, slotTip(r))));
         xLabels(s, slots.map(r => r.year), i => L + slot * (i + .5));
         return s;
     }
-    function bandChart(rows, { label }) {
-        const slots = yearSlots(rows), maxY = Math.max(...rows.map(r => r.p90), 1e-9) * 1.1, s = frame(label, maxY);
-        const x = i => L + (W - L - R) * (slots.length === 1 ? .5 : i / (slots.length - 1)), y = v => T + (H - T - B) * (1 - v / maxY);
-        // Contiguous runs of years with data; each run gets its own band and line, so gaps stay open.
+    function bandChart(slots, { label }) {
+        const maxY = slotTop(slots), s = frame(label, maxY), pad = slots.some(r => r.pts) ? 22 : 0;   // room for dots at the ends
+        const x = i => L + pad + (W - L - R - 2 * pad) * (slots.length === 1 ? .5 : i / (slots.length - 1)), y = v => T + (H - T - B) * (1 - Math.min(v, maxY) / maxY);
+        // Contiguous runs of years with a summary; each run gets its own band and line, so gaps stay open.
         const runs = []; slots.forEach((r, i) => { if (!r.d) return; const last = runs.at(-1); if (last && last.at(-1).i === i - 1) last.push({ ...r, i }); else runs.push([{ ...r, i }]); });
         const area = (run, hi, lo) => 'M' + run.map(r => `${x(r.i).toFixed(1)},${y(r.d[hi]).toFixed(1)}`).join('L') + 'L' + [...run].reverse().map(r => `${x(r.i).toFixed(1)},${y(r.d[lo]).toFixed(1)}`).join('L') + 'Z';
         const path = (run, key) => 'M' + run.map(r => `${x(r.i).toFixed(1)},${y(r.d[key]).toFixed(1)}`).join('L');
@@ -161,24 +184,33 @@
             s.append(svg('path', { d: path(run, 'median'), fill: 'none', stroke: 'currentColor', 'stroke-width': 2 }));
             for (const r of run) s.append(svg('circle', { cx: x(r.i), cy: y(r.d.median), r: 2.8, fill: r.d.small ? '#fff' : 'currentColor', stroke: 'currentColor', 'stroke-width': 1.2 }));
         }
+        slots.forEach((r, i) => r.pts && dots(s, x(i), r.pts, y, maxY));
         const col = (W - L - R) / Math.max(slots.length - 1, 1);
-        slots.forEach(({ year, d }, i) => s.append(svg('rect', { x: x(i) - col / 2, y: T, width: col, height: H - T - B, fill: 'transparent', class: 'uam-hit' }, d ? S.distTip(year, d) : `${year}: ${S.na}`)));
+        slots.forEach((r, i) => s.append(svg('rect', { x: x(i) - col / 2, y: T, width: col, height: H - T - B, fill: 'transparent', class: 'uam-hit' }, slotTip(r))));
         xLabels(s, slots.map(r => r.year), x);
         return s;
     }
     function distributionSection(data) {
         const dist = data.distributions;
         if (!dist) return null;   // journal file from before this feature
-        const fwci = distRows(dist.fwci), cites = distRows(dist.citations), small = dist.small_base_below, cards = [];
-        const table = rows => numbers(S.distHead, rows.map(r => [r.year, num(r.n), ...[r.p10, r.q1, r.median, r.q3, r.p90, r.max, r.mean].map(dec)]));
+        const few = dist.few || {}, small = dist.small_base_below, cards = [];
+        const fwciRows = distRows(dist.fwci), citeRows = distRows(dist.citations);
+        const fwci = fwciRows.length || few.fwci?.length ? yearSlots(fwciRows, few.fwci) : [], cites = citeRows.length || few.citations?.length ? yearSlots(citeRows, few.citations) : [];
+        const table = slots => numbers(S.distHead, slots.filter(r => r.d || r.pts).map(({ year, d, pts }) => d ? [year, num(d.n), ...[d.p10, d.q1, d.median, d.q3, d.p90, d.max, d.mean].map(dec)]
+            : [year, num(pts.length), S.fewValues(pts.map(dec).join(', ')), '', '', '', '', '', '']));
         const sw = { box: `background:${DIST.inner}55;border:1px solid ${DIST.inner}`, whisker: `background:none;border-top:2px solid ${DIST.outer};border-bottom:2px solid ${DIST.outer};height:8px`,
             outer: `background:${DIST.outer}38`, inner: `background:${DIST.inner}66`, median: 'background:currentColor;height:3px', mean: `background:${DIST.mean};transform:rotate(45deg);width:8px;height:8px`,
             meanLine: `background:none;border-top:2px dashed ${DIST.mean};height:0`, max: 'background:currentColor;opacity:.55;border-radius:50%;width:7px;height:7px', ref: 'background:none;border-top:2px dashed currentColor;opacity:.55;height:0',
-            small: `background:${DIST.inner}24;border:1px dashed ${DIST.inner}`, hollow: 'background:#fff;border:1.5px solid currentColor;border-radius:50%;width:8px;height:8px' };
+            small: `background:${DIST.inner}24;border:1px dashed ${DIST.inner}`, hollow: 'background:#fff;border:1.5px solid currentColor;border-radius:50%;width:8px;height:8px',
+            dot: `background:${DIST.inner};border-radius:50%;width:7px;height:7px` };
+        // Legend only for the marks on screen: summaries, small bases and dots.
+        const has = (slots, test) => slots.some(test), fewLegend = slots => has(slots, r => r.pts) ? [[sw.dot, S.legFew(dist.min_works)]] : [];
         if (fwci.length) cards.push(card(S.distFwci, S.distFwciNote(dist.min_works), boxChart(fwci, { label: S.distFwci, reference: 1 }),
-            distLegend([[sw.box, S.legBox], [sw.whisker, S.legWhisker], [sw.median, S.legMedian], [sw.mean, S.legMean], [sw.max, S.legMax], [sw.ref, S.legRef], [sw.small, S.legSmall(small)]]), storyBox(dist.story?.fwci), table(fwci)));
+            distLegend([...(has(fwci, r => r.d) ? [[sw.box, S.legBox], [sw.whisker, S.legWhisker], [sw.median, S.legMedian], [sw.mean, S.legMean], [sw.max, S.legMax]] : []), [sw.ref, S.legRef],
+                ...(has(fwci, r => r.d?.small) ? [[sw.small, S.legSmall(small)]] : []), ...fewLegend(fwci)]), storyBox(dist.story?.fwci), table(fwci)));
         if (cites.length) cards.push(card(S.distCitations, S.distCitationsNote(dist.min_works), bandChart(cites, { label: S.distCitations }),
-            distLegend([[sw.inner, S.legBox], [sw.outer, S.legOuter], [sw.median, S.legMedian], [sw.meanLine, S.legMean], [sw.hollow, S.legHollow(small)]]), storyBox(dist.story?.citations), table(cites)));
+            distLegend([...(has(cites, r => r.d) ? [[sw.inner, S.legBox], [sw.outer, S.legOuter], [sw.median, S.legMedian], [sw.meanLine, S.legMean]] : []),
+                ...(has(cites, r => r.d?.small) ? [[sw.hollow, S.legHollow(small)]] : []), ...fewLegend(cites)]), storyBox(dist.story?.citations), table(cites)));
         return cards.length ? [el('h3', {}, S.distTitle), el('div', { class: 'uam-grid' }, ...cards)] : null;
     }
     const shades = n => Array.from({ length: n }, (_, i) => i < 3 ? { c: 'var(--uam-accent)', o: [1, .62, .34][i] } : { c: 'currentColor', o: [.5, .3, .18][(i - 3) % 3] });

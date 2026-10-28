@@ -199,67 +199,100 @@ function distributionLegend(p, items) {
     }
     p.body.after(list);
 }
+// Years with fewer works than a box needs (rows with `points`) show one dot per work. Equal values sit side by side.
+const FEW_NOTE = 'Dot: one work, in years with too few works for a box';
+function fewLines(points, unit = '') {
+    return [`${integer.format(points.length)} works, too few for a distribution; each dot is one work`,
+        `Values: ${points.map(v => decimal.format(v)).join(', ')}${unit ? ' ' + unit : ''}`];
+}
+function drawDots(ctx, x, points, py, top, areaTop, color) {
+    const placed = [];
+    for (const v of points) {
+        const above = v > top, y = above ? areaTop + 4 : py(v), same = placed.filter(q => Math.abs(q - y) < 6).length;
+        placed.push(y);
+        const dx = (same % 2 ? 1 : -1) * Math.ceil(same / 2) * 7;
+        ctx.beginPath();
+        if (above) { ctx.moveTo(x + dx, areaTop); ctx.lineTo(x + dx + 4.5, areaTop + 8); ctx.lineTo(x + dx - 4.5, areaTop + 8); ctx.closePath(); }
+        else ctx.arc(x + dx, y, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+}
+// Axis top: a little above the highest P90 (and the P90 of the dots), so one extreme work does not flatten the chart.
+function distributionTop(shown, reference) {
+    const pooled = shown.filter(r => r.points).flatMap(r => r.points).sort((a, b) => a - b);
+    const tops = [...shown.filter(r => r.distribution).map(r => r.distribution.p90), pooled.length ? pooled[Math.floor((pooled.length - 1) * .9)] : 0, Number.isFinite(reference) ? reference : 0];
+    return niceCeil(Math.max(...tops) * 1.15 || 1);
+}
 // Box plot: a floating bar per year for P25–P75; an inline plugin draws the P10–P90 whiskers, the median, the mean
-// and the maximum. The axis stops a little above the highest P90 so one extreme work does not flatten the boxes;
-// a maximum above the axis is a triangle at the top. Small-base years are drawn lighter with a dashed outline.
+// and the maximum, and the dots of few-work years. A value above the axis is a triangle at the top.
+// Small-base years are drawn lighter with a dashed outline.
 export function boxPlot(p, rows, { reference = null, referenceLabel, unit = '', tooltip, onClick } = {}) {
-    const shown = rows.filter(r => r.distribution), C = DIST_COLORS;
-    if (!shown.length) { empty(p, 'Too few works per year for a distribution in this filter.'); return; }
+    const shown = rows.filter(r => r.distribution || r.points), C = DIST_COLORS;
+    if (!shown.length) { empty(p, 'No works with a value in this filter.'); return; }
     rows = rows.slice(rows.indexOf(shown[0]), rows.indexOf(shown.at(-1)) + 1);   // trim empty ends, keep inner gaps
-    const top = niceCeil(Math.max(...shown.map(r => r.distribution.p90), Number.isFinite(reference) ? reference : 0) * 1.15 || 1);
+    const top = distributionTop(shown, reference), anyFew = shown.some(r => r.points);
     const datasets = [{ label: 'P25–P75', data: rows.map(r => r.distribution ? [r.distribution.q1, r.distribution.q3] : null),
         backgroundColor: rows.map(r => tint(C.inner, r.distribution?.small_base ? .15 : .35)), borderColor: C.inner, borderWidth: 1.5,
-        borderSkipped: false, borderRadius: 2, minBarLength: 2, maxBarThickness: 36 }];
+        borderSkipped: false, borderRadius: 2, minBarLength: 2, maxBarThickness: 36 },
+        // Invisible anchor so the tooltip and clicks also work on few-work years.
+        { type: 'line', label: '__few', data: rows.map(r => r.points ? 0 : null), showLine: false, pointRadius: 0, pointHitRadius: 0 }];
     if (Number.isFinite(reference)) datasets.push({ type: 'line', label: referenceLabel || `Reference ${reference}`, data: rows.map(() => reference),
         borderColor: C.reference, borderDash: [6, 5], pointRadius: 0, borderWidth: 1.5, fill: false });
     const marks = { id: 'boxMarks', afterDatasetsDraw(c) {
-        const { ctx, chartArea: area } = c, y = c.scales.y, py = v => y.getPixelForValue(Math.min(v, y.max));
+        const { ctx, chartArea: area } = c, y = c.scales.y, x = c.scales.x, py = v => y.getPixelForValue(Math.min(v, y.max));
         ctx.save();
         c.getDatasetMeta(0).data.forEach((box, i) => {
-            const d = rows[i].distribution, x = box.x, half = box.width / 2, tick = half * .55;
+            const d = rows[i].distribution, cx = x.getPixelForValue(i), half = box.width / 2, tick = half * .55;
+            if (rows[i].points) { drawDots(ctx, cx, rows[i].points, py, y.max, area.top, C.inner); return; }
             if (!d) return;
             if (d.small_base) {   // dashed outline over the lighter box
                 ctx.setLineDash([3, 3]); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
-                ctx.strokeRect(x - half, py(d.q3), half * 2, py(d.q1) - py(d.q3)); ctx.setLineDash([]);
+                ctx.strokeRect(cx - half, py(d.q3), half * 2, py(d.q1) - py(d.q3)); ctx.setLineDash([]);
             }
             ctx.strokeStyle = C.outer; ctx.lineWidth = 2; ctx.beginPath();
-            ctx.moveTo(x, py(d.q3)); ctx.lineTo(x, py(d.p90)); ctx.moveTo(x - tick, py(d.p90)); ctx.lineTo(x + tick, py(d.p90));
-            ctx.moveTo(x, py(d.q1)); ctx.lineTo(x, py(d.p10)); ctx.moveTo(x - tick, py(d.p10)); ctx.lineTo(x + tick, py(d.p10));
+            ctx.moveTo(cx, py(d.q3)); ctx.lineTo(cx, py(d.p90)); ctx.moveTo(cx - tick, py(d.p90)); ctx.lineTo(cx + tick, py(d.p90));
+            ctx.moveTo(cx, py(d.q1)); ctx.lineTo(cx, py(d.p10)); ctx.moveTo(cx - tick, py(d.p10)); ctx.lineTo(cx + tick, py(d.p10));
             ctx.stroke();
             ctx.strokeStyle = C.median; ctx.lineWidth = 3; ctx.beginPath();
-            ctx.moveTo(x - half, py(d.median)); ctx.lineTo(x + half, py(d.median)); ctx.stroke();
+            ctx.moveTo(cx - half, py(d.median)); ctx.lineTo(cx + half, py(d.median)); ctx.stroke();
             if (d.mean <= y.max) {   // mean: diamond with a white ring so it stays visible on the median line
                 const m = py(d.mean); ctx.beginPath();
-                ctx.moveTo(x, m - 5); ctx.lineTo(x + 5, m); ctx.lineTo(x, m + 5); ctx.lineTo(x - 5, m); ctx.closePath();
+                ctx.moveTo(cx, m - 5); ctx.lineTo(cx + 5, m); ctx.lineTo(cx, m + 5); ctx.lineTo(cx - 5, m); ctx.closePath();
                 ctx.fillStyle = C.mean; ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
             }
             ctx.fillStyle = C.max; ctx.beginPath();
-            if (d.max > y.max) { ctx.moveTo(x, area.top); ctx.lineTo(x + 4.5, area.top + 8); ctx.lineTo(x - 4.5, area.top + 8); ctx.closePath(); }
-            else ctx.arc(x, py(d.max), 3, 0, Math.PI * 2);
+            if (d.max > y.max) { ctx.moveTo(cx, area.top); ctx.lineTo(cx + 4.5, area.top + 8); ctx.lineTo(cx - 4.5, area.top + 8); ctx.closePath(); }
+            else ctx.arc(cx, py(d.max), 3, 0, Math.PI * 2);
             ctx.fill();
         });
         ctx.restore();
     } };
-    const describe = r => tooltip ? tooltip(r) : `${r.year}: ${distributionLines(r.distribution, unit).join(' · ')}`;
+    const lines = r => r.points ? fewLines(r.points, unit) : distributionLines(r.distribution, unit).map((line, i) => i === 3 && r.distribution?.max > top ? line + ' (above the axis)' : line);
+    const describe = r => tooltip && r.distribution ? tooltip(r) : `${r.year}: ${lines(r).join(' · ')}`;
+    const usable = r => r.distribution || r.points;
     chart(p, 'bar', { labels: rows.map(r => String(r.year)), datasets }, {
         interaction: { mode: 'index', axis: 'x', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { filter: item => item.datasetIndex === 0, callbacks: {
-            label: c => distributionLines(rows[c.dataIndex].distribution, unit).map((line, i) => i === 3 && rows[c.dataIndex].distribution?.max > top ? line + ' (above the axis)' : line) } } },
-        onClick: (_e, e) => e[0] && rows[e[0].index].distribution && onClick?.(rows[e[0].index]),
+        plugins: { legend: { display: false }, tooltip: { filter: item => item.datasetIndex === (rows[item.dataIndex].points ? 1 : 0), callbacks: {
+            label: c => lines(rows[c.dataIndex]) } } },
+        onClick: (_e, e) => e[0] && usable(rows[e[0].index]) && onClick?.(rows[e[0].index]),
         onHover: (e, items) => { if (e.native?.target) e.native.target.style.cursor = items.length && onClick ? 'pointer' : 'default'; },
         scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick } },
             y: { beginAtZero: true, max: top, grid: { color: CHART.grid }, border: { display: false }, ticks: { font: { size: 9 }, color: CHART.tick } } } }, [marks]);
     accessible(p, shown.map(r => ({ ...r, name: String(r.year), description: describe(r) })), onClick);
-    distributionLegend(p, [['box', C.inner, 'Box: middle 50% of works (P25–P75)'], ['whisker', C.outer, 'Whiskers: middle 80% (P10–P90)'],
-        ['bar', C.median, 'Median'], ['diamond', C.mean, 'Mean'], ['dot', C.max, 'Maximum (▲ above the axis)'],
-        ...(Number.isFinite(reference) ? [['dash', C.reference, referenceLabel || 'Reference']] : []), ['box faint', C.inner, 'Lighter, dashed box: small base']]);
+    const anyBox = shown.some(r => r.distribution);
+    distributionLegend(p, [...(anyBox ? [['box', C.inner, 'Box: middle 50% of works (P25–P75)'], ['whisker', C.outer, 'Whiskers: middle 80% (P10–P90)'],
+        ['bar', C.median, 'Median'], ['diamond', C.mean, 'Mean'], ['dot', C.max, 'Maximum (▲ above the axis)']] : []),
+        ...(Number.isFinite(reference) ? [['dash', C.reference, referenceLabel || 'Reference']] : []), ...(shown.some(r => r.distribution?.small_base) ? [['box faint', C.inner, 'Lighter, dashed box: small base']] : []),
+        ...(anyFew ? [['dot', C.inner, FEW_NOTE]] : [])]);
 }
 // Percentile band: median line inside a P25–P75 band and a lighter P10–P90 band, with the mean dashed for comparison.
-// Small-base years have a hollow median point. Chart.js draws higher `order` first, so the bands go under the lines.
+// Small-base years have a hollow median point; few-work years show one dot per work. Chart.js draws higher `order`
+// first, so the bands go under the lines.
 export function percentileBand(p, rows, { unit = '', tooltip, onClick } = {}) {
-    const shown = rows.filter(r => r.distribution), C = DIST_COLORS;
-    if (!shown.length) { empty(p, 'Too few works per year for a distribution in this filter.'); return; }
+    const shown = rows.filter(r => r.distribution || r.points), C = DIST_COLORS;
+    if (!shown.length) { empty(p, 'No works with a value in this filter.'); return; }
     rows = rows.slice(rows.indexOf(shown[0]), rows.indexOf(shown.at(-1)) + 1);   // trim empty ends, keep inner gaps
+    const anyFew = shown.some(r => r.points), pooled = shown.filter(r => r.points).flatMap(r => r.points).sort((a, b) => a - b);
     const v = key => rows.map(r => r.distribution?.[key] ?? null), edge = { borderColor: 'transparent', pointRadius: 0, pointHitRadius: 0, tension: .25 };
     const datasets = [
         { ...edge, label: 'P90', data: v('p90'), fill: false, order: 5 },
@@ -269,18 +302,29 @@ export function percentileBand(p, rows, { unit = '', tooltip, onClick } = {}) {
         { label: 'Median', order: 0, data: v('median'), borderColor: C.median, borderWidth: 2, tension: .25, fill: false, pointRadius: 3.5, pointHoverRadius: 6,
             pointBackgroundColor: rows.map(r => r.distribution?.small_base ? '#ffffff' : C.median), pointBorderColor: C.median, pointBorderWidth: 1.5 },
         { label: 'Mean', order: 1, data: v('mean'), borderColor: C.mean, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25, fill: false },
+        { label: '__few', order: 6, data: rows.map(r => r.points ? 0 : null), showLine: false, pointRadius: 0, pointHitRadius: 0 },
     ];
-    const describe = r => tooltip ? tooltip(r) : `${r.year}: ${distributionLines(r.distribution, unit).join(' · ')}`;
+    const dots = { id: 'fewDots', afterDatasetsDraw(c) {
+        const y = c.scales.y, x = c.scales.x, py = val => y.getPixelForValue(Math.min(val, y.max));
+        c.ctx.save();
+        rows.forEach((r, i) => r.points && drawDots(c.ctx, x.getPixelForValue(i), r.points, py, y.max, c.chartArea.top, C.inner));
+        c.ctx.restore();
+    } };
+    const lines = r => r.points ? fewLines(r.points, unit) : distributionLines(r.distribution, unit);
+    const describe = r => tooltip && r.distribution ? tooltip(r) : `${r.year}: ${lines(r).join(' · ')}`;
+    const fewTop = pooled.length ? pooled[Math.floor((pooled.length - 1) * .9)] * 1.15 : undefined;
     chart(p, 'line', { labels: rows.map(r => String(r.year)), datasets }, {
         interaction: { mode: 'index', axis: 'x', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { filter: item => item.datasetIndex === 4, callbacks: {
-            label: c => distributionLines(rows[c.dataIndex].distribution, unit) } } },
-        onClick: (_e, e) => e[0] && rows[e[0].index].distribution && onClick?.(rows[e[0].index]),
-        scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick, maxTicksLimit: 12 } },
-            y: { beginAtZero: true, grid: { color: CHART.grid }, border: { display: false }, ticks: { font: { size: 9 }, color: CHART.tick } } } });
+        plugins: { legend: { display: false }, tooltip: { filter: item => item.datasetIndex === (rows[item.dataIndex].points ? 6 : 4), callbacks: {
+            label: c => lines(rows[c.dataIndex]) } } },
+        onClick: (_e, e) => e[0] && (rows[e[0].index].distribution || rows[e[0].index].points) && onClick?.(rows[e[0].index]),
+        scales: { x: { offset: anyFew, grid: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick, maxTicksLimit: 12 } },
+            y: { beginAtZero: true, suggestedMax: fewTop, grid: { color: CHART.grid }, border: { display: false }, ticks: { font: { size: 9 }, color: CHART.tick, precision: unit === 'citations' ? 0 : undefined } } } }, [dots]);
     accessible(p, shown.map(r => ({ ...r, name: String(r.year), description: describe(r) })), onClick);
-    distributionLegend(p, [['band', C.inner, 'Middle 50% of works (P25–P75)'], ['band outer', C.outer, 'Middle 80% (P10–P90)'],
-        ['line', C.median, 'Median'], ['dash', C.mean, 'Mean'], ['ring', C.median, 'Hollow point: small base']]);
+    const anyBand = shown.some(r => r.distribution);
+    distributionLegend(p, [...(anyBand ? [['band', C.inner, 'Middle 50% of works (P25–P75)'], ['band outer', C.outer, 'Middle 80% (P10–P90)'],
+        ['line', C.median, 'Median'], ['dash', C.mean, 'Mean']] : []), ...(shown.some(r => r.distribution?.small_base) ? [['ring', C.median, 'Hollow point: small base']] : []),
+        ...(anyFew ? [['dot', C.inner, FEW_NOTE]] : [])]);
 }
 export function timelineYears(rows, availableYears, range = '10', { individual = false, omitEmpty = false } = {}) {
     const activeYears = [...new Set(availableYears)].filter(year => rows.some(row => row.years[year] > 0)).sort((a, b) => a - b);

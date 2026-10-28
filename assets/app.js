@@ -829,10 +829,10 @@ function collaborationMap(grid, { title = 'Partner country map', note, includeHo
 // and on every journal page, with the same rules, so a journal reads against the whole portfolio.
 function distributionCharts(grid, { wide = false, owner = scopeName[filter.scope] } = {}) {
     const min = 10, open = r => drill({ from: r.year, to: r.year });
-    const box = panel(grid, 'FWCI distribution by publication year (box plot)', `${owner} · spread of FWCI scores of the works in each publication year, after the same date checks as the FWCI timeline. A mean can be lifted by a few highly cited works; the median and box show where most works are. Years with fewer than ${min} works with FWCI are left empty; 10–29 works are a small base.`, wide);
+    const box = panel(grid, 'FWCI distribution by publication year (box plot)', `${owner} · spread of FWCI scores of the works in each publication year, after the same date checks as the FWCI timeline. A mean can be lifted by a few highly cited works; the median and box show where most works are. Years with fewer than ${min} works with FWCI show one dot per work instead of a box; 10–29 works are a small base.`, wide);
     boxPlot(box, data.fwci_timeline, { reference: 1, referenceLabel: 'FWCI 1 · global benchmark', unit: 'FWCI', onClick: open });
     chartStory(box, distributionStory('fwci', data.fwci_timeline, data.current_year));
-    const band = panel(grid, 'Citations per work by publication year', `${owner} · cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower by construction. Years with fewer than ${min} works are left out; 10–29 works are a small base.`, wide);
+    const band = panel(grid, 'Citations per work by publication year', `${owner} · cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower by construction. Years with fewer than ${min} works show one dot per work instead of a band; 10–29 works are a small base.`, wide);
     percentileBand(band, data.citation_distribution, { unit: 'citations', onClick: open });
     chartStory(band, distributionStory('citations', data.citation_distribution, data.current_year));
 }

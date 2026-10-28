@@ -235,8 +235,11 @@ export function journalWidgetData(journal, works, entities, manifest, dataset) {
         // [year, works, P10, P25, median, P75, P90, max, mean, small base 0|1]; years with too few works are left out.
         distributions: { min_works: DISTRIBUTION_POLICY.min_works, small_base_below: DISTRIBUTION_POLICY.small_base_below,
             fwci: distributionRows(summary.fwci_timeline), citations: distributionRows(summary.citation_distribution),
+            // Years with 1–9 works: [year, [value of each work, ascending]], drawn as one dot per work.
+            few: { fwci: fewRows(summary.fwci_timeline), citations: fewRows(summary.citation_distribution) },
             story: { fwci: distributionStory('fwci', summary.fwci_timeline, currentYear), citations: distributionStory('citations', summary.citation_distribution, currentYear) } } };
 }
+const fewRows = rows => rows.filter(r => r.points).map(r => [r.year, r.points.map(v => compact(v, 3))]);
 const distributionRows = rows => rows.filter(r => r.distribution).map(({ year, distribution: d }) =>
     [year, d.n, ...[d.p10, d.q1, d.median, d.q3, d.p90, d.max, d.mean].map(v => compact(v, 3)), d.small_base ? 1 : 0, compact(d.zero_share, 3), compact(d.above_one, 3)]);
 // Language codes from OpenAlex (ISO 639-1, e.g. "id") shown as English names ("Indonesian"); the code stays the filter ID.
@@ -491,6 +494,11 @@ export function normalizedPublicationGrowth(works, yearRows, filter, currentYear
 // Distributions (box plot, percentile band) need fewer works than a mean line to be readable, so journal pages keep
 // most years: from 10 works a year is shown, and below the FWCI line base of 30 it is marked as a small base.
 export const DISTRIBUTION_POLICY = Object.freeze({ min_works: 10, small_base_below: 30 });
+// Years below the minimum keep every value, so charts can draw one dot per work instead of leaving the year empty.
+function fewPoints(values) {
+    const list = values.filter(validNumber);
+    return list.length && list.length < DISTRIBUTION_POLICY.min_works ? list.sort((a, b) => a - b) : null;
+}
 function yearDistribution(values) {
     if (values.length < DISTRIBUTION_POLICY.min_works) return null;
     const d = distribution(values);
@@ -515,7 +523,7 @@ export function normalizedAnnualFWCI(works, yearRows, filter, currentYear) {
     const last = filter.to ? Math.min(currentYear, Number(filter.to)) : '';
     const rows = annualFWCI([...byYear.values()], first, last).map(row => ({ ...row,
         observed_fwci: row.fwci, fwci: row.fwci_n >= FWCI_POLICY.min_works ? row.fwci : null,
-        distribution: yearDistribution(scores.get(row.year) || []),
+        distribution: yearDistribution(scores.get(row.year) || []), points: fewPoints(scores.get(row.year) || []),
         status: !row.fwci_n ? 'no_metric' : row.fwci_n < FWCI_POLICY.min_works ? 'small_sample' : 'valid' }));
     const excludedCount = Object.values(excluded).reduce((sum, count) => sum + count, 0);
     return { rows, normalization: { policy: FWCI_POLICY, date_policy: GROWTH_POLICY, excluded, excluded_count: excludedCount,
@@ -535,14 +543,14 @@ export function annualCitationDistribution(works, filter, currentYear) {
     const from = Number(filter.from) || 0, to = Number(filter.to) || 9999;
     return [...byYear].filter(([year]) => year >= from && year <= to).sort((a, b) => a[0] - b[0]).map(([year, values]) => ({
         id: String(year), year, count: values.length,
-        distribution: yearDistribution(values),
+        distribution: yearDistribution(values), points: fewPoints(values),
         status: values.length < DISTRIBUTION_POLICY.min_works ? 'too_few' : values.length < DISTRIBUTION_POLICY.small_base_below ? 'small_base' : 'valid' }));
 }
 // Plain-language reading of a distribution chart ("how to read this chart"), built from the same rows the chart
 // draws, so the dashboard, the journal pages, the widget and the iframe tell the same story. English, like the UI.
 export function distributionStory(kind, rows, currentYear) {
-    const shown = rows.filter(r => r.distribution);
-    if (!shown.length) return [];
+    const shown = rows.filter(r => r.distribution), few = rows.filter(r => r.points?.length);
+    if (!shown.length && !few.length) return [];
     const fwci = kind === 'fwci', digits = fwci ? 2 : 1;
     const f = v => String(Number(v.toFixed(digits))), pc = v => `${Math.round(v * 100)}%`;
     const span = list => list.length === 1 ? String(list[0].year) : `${list[0].year}–${list.at(-1).year}`;
@@ -551,6 +559,8 @@ export function distributionStory(kind, rows, currentYear) {
         const parts = runs.map(([a, b]) => a === b ? String(a) : `${a}–${b}`); return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]; };
     // Older years with a closed citation window and a full base are the fair ones to read; fall back if there are none.
     const settled = r => fwci ? r.year + 3 < currentYear : r.year <= currentYear - 3;
+    const fewLine = () => `Few works: ${yearsText(few)} ${few.length === 1 ? 'has' : 'have'} fewer than 10 works${few.length <= 3 ? ` (${few.map(r => `${r.year}: ${r.points.length}`).join(', ')})` : ''}, too few for ${fwci ? 'a box' : 'a band'}. Each of those works is drawn as a dot.`;
+    if (!shown.length) return [fewLine()];
     const solid = shown.filter(r => !r.distribution.small_base), mature = (solid.length ? solid : shown).filter(settled);
     const ref = mature.length ? mature : (solid.length ? solid : shown), d = r => r.distribution;
     const lines = [], between = (a, b, fmt) => a === b ? fmt(a) : `${fmt(a)}–${fmt(b)}`;
@@ -582,6 +592,7 @@ export function distributionStory(kind, rows, currentYear) {
         : `Recent years: works from ${yearsText(open)} have had less than three years to be cited, so their values will rise.`);
     const small = shown.filter(r => d(r).small_base);
     if (small.length) lines.push(`Small base: the values for ${yearsText(small)} are based on only 10–29 works (lighter box or hollow point), so read them with care.`);
+    if (few.length) lines.push(fewLine());
     return lines;
 }
 export function entityPage(works, entities, filter, manifest, options = {}) {
