@@ -2,10 +2,10 @@
  * Licensed under the PolyForm Noncommercial License 1.0.0
  * (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial use requires prior
  * written permission from the copyright holder. See LICENSE and NOTICE. */
-import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, filterQuery, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS } from './metrics.js';
+import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, filterQuery, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS, distributionStory, ORIGIN_GROUPS } from './metrics.js';
 import { renderImpactMetrics, renderJournalRecap, renderJournalHeader, renderAuthorHeader, renderJournalMetrics, renderJournalCitations, renderJournalTable, journalEmbedURL, journalWidgetInstall, METRIC_TITLES, metricYear } from './journal-panel.js';
 import { EXPORT_CONTROLS, SHOW_AUDIT_TAB, CONTENT_PROTECTION } from './config.js';
-import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
+import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, boxPlot, percentileBand, chartStory, shareBar, ORIGIN_COLORS, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
 const sdgColor = id => SDG_COLORS[Number(id) - 1] || PALETTE[0];
 const $ = id => document.getElementById(id), nf = new Intl.NumberFormat('en-US'), df = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const num = n => n === null || n === undefined ? 'Not available' : nf.format(n);
@@ -109,7 +109,7 @@ function drill(patch) {
 function readRoute() {
     const [route, query = ''] = location.hash.slice(1).split('?');
     currentModule = MODULES.some(([id]) => id === route) && moduleEnabled(route) ? route : 'overview';
-    const allowed = new Set(['from', 'to', 'scope', 'corpus', 'type', 'language', 'license', 'version', 'locationType', 'local', 'field', 'topic', 'oa', 'author', 'partner', 'country', 'funder', 'award', 'source', 'sdg', 'design', 'bin', 'audit', 'metric', 'dateQuality', 'fwciQuality', 'q', 'journal', 'metricYear', 'metricKind', 'metricPart']);
+    const allowed = new Set(['from', 'to', 'scope', 'corpus', 'type', 'language', 'license', 'version', 'locationType', 'local', 'origin', 'field', 'topic', 'oa', 'author', 'partner', 'country', 'funder', 'award', 'source', 'sdg', 'design', 'bin', 'audit', 'metric', 'dateQuality', 'fwciQuality', 'q', 'journal', 'metricYear', 'metricKind', 'metricPart']);
     filter = moduleDefaults(currentModule);
     for (const [k, v] of new URLSearchParams(query))
         if (allowed.has(k))
@@ -185,7 +185,7 @@ function syncFilters() {
         field.value = filter[key] ?? '';
     }
     $('active-filters').replaceChildren();
-    const labels = { topic: 'Topic', author: 'Author', partner: 'Partner', country: 'Country', funder: 'Funder', award: 'Award', source: 'Source', sdg: 'SDG', design: 'Study design', language: 'Language', license: 'License', version: 'Version', locationType: 'Location', local: `${home()} affiliation`, bin: 'Citation range', audit: 'Audit', metric: 'Indicator', dateQuality: 'Timeline-eligible date', fwciQuality: 'FWCI eligibility', q: 'Search' };
+    const labels = { topic: 'Topic', author: 'Author', partner: 'Partner', country: 'Country', funder: 'Funder', award: 'Award', source: 'Source', sdg: 'SDG', design: 'Study design', language: 'Language', license: 'License', version: 'Version', locationType: 'Location', local: `${home()} affiliation`, origin: 'Author origin', bin: 'Citation range', audit: 'Audit', metric: 'Indicator', dateQuality: 'Timeline-eligible date', fwciQuality: 'FWCI eligibility', q: 'Search' };
     $('filter-scope').disabled = $('filter-corpus').disabled = journalPage() || authorPage();
     for (const [key, label] of Object.entries(labels))
         if (filter[key] !== undefined && filter[key] !== '' && !(key === 'source' && journalPage()) && !(key === 'author' && authorPage())) {
@@ -580,6 +580,7 @@ function render() {
     }
     else if (currentModule === 'citations') {
         fwciTimeline(grid);
+        distributionCharts(grid, { wide: true });
         bar(panel(grid, 'Citation distribution of works', 'Includes works not yet cited.'), data.histogram, { horizontal: false, onClick: r => drill({ bin: r.id }) });
         line(panel(grid, 'Citations by year received', 'Counts from counts_by_year; the available window is limited, not the full history.'), data.citation_years.map(([year, count]) => ({ year, count })), { label: 'Citations observed',unit:'citations' });
         scatter(panel(grid, 'Work age and citations', 'At most the 250 most cited works; age is counted from the snapshot year.'), data.scatter, { x: 'age', y: 'citations', xTitle: 'Work age (years)', onClick: r => openWork(r.id) });
@@ -649,13 +650,12 @@ function render() {
         // Citations per year is fixed for the journal; the other charts use the journal-only summary and narrow this page.
         renderJournalCitations(grid, journalDataset, journal, filter, year => setHash('journals', { ...filter, metricYear: year }));
         line(panel(grid, 'Journal publications over time', 'Journal works by publication year. Click a year to narrow this page.'), data.top.years, { onClick: drillYear });
+        distributionCharts(grid, { owner: journal.name });
         stacked(panel(grid, 'Work types by year', 'Unique works of this journal; minor types may fall outside the top six series.'), groupedYears('types'), data.top.types.slice(0, 6), { onClick: (y, s) => drill({ from: y.year, to: y.year, type: s.id }) });
         stacked(panel(grid, 'Access composition by year', 'Share of OA status for this journal\'s works per year.'), data.oa_years.map(y => ({ ...y, values: y.oa })), data.top.oa, { percentage: true, onClick: (y, s) => drill({ from: y.year, to: y.year, oa: s.id }) });
         // SDG card beside author affiliation (as in the OJS widget).
         sdgCard(grid, 'SDGs of journal works');
-        const own = data.top.journals.find(r => r.id === journal.id) || { count: 0, local: 0 };
-        donut(panel(grid, 'Author affiliation origin', `This journal's works with at least one ${home()} authorship versus works without a ${home()} affiliation.`),
-            data.total ? [{ id: 'yes', name: `With ${home()} affiliation`, count: own.local, color: '#0072B2' }, { id: 'no', name: `Without ${home()} affiliation`, count: own.count - own.local, color: '#D55E00' }] : [], r => drill({ local: r.id }));
+        originPanel(grid);
         // Contributor countries as a full-width bubble map at the bottom, home country included.
         collaborationMap(grid, { title: 'Contributor countries', includeHome: true, unit: 'works',
             note: `Every author affiliation country on this journal's works, including ${homeCountry()}. Bubble area is proportional to the number of works; one work can count for several countries. Hover, focus or tap a bubble to see its count.` });
@@ -665,10 +665,10 @@ function render() {
         scatter(panel(grid, 'Source volume and citations'), data.top.sources, { bubble: true, onClick: r => drill({ source: r.id }) });
         groupBar(grid, 'Contributor countries', 'countries', 'country', `Works published by ${home()} can be written by researchers outside ${home()}.`);
         stacked(panel(grid, 'Access composition by year'), data.oa_years.map(y => ({ ...y, values: y.oa })), data.top.oa, { percentage: true, onClick: (y, s) => drill({ from: y.year, to: y.year, oa: s.id }) });
-        const origins = panel(grid, 'Affiliation origin by source', `The 10 journals with the most works in the active filter. Each bar = 100% of that journal's works: at least one ${home()} authorship, or no ${home()} affiliation. Full names and numbers are in the tooltip and the chart data.`, true);
+        const origins = panel(grid, 'Author origin by journal', `The 10 journals with the most works in the active filter. Each bar = 100% of that journal's authorships. ${originNote()}`, true);
         origins.node.classList.add('source-origins');
         origins.body.style.height = '510px';
-        stacked(origins, data.top.journals.map(r => ({ year: r.name, total: r.count, source: r.id, values: { local: r.local, external: r.count - r.local } })), [{ id: 'local', name: `With ${home()} affiliation` }, { id: 'external', name: `Without ${home()} affiliation` }], { percentage: true, horizontal: true, onClick: (y, s) => drill({ source: y.source, local: s.id === 'local' ? 'yes' : 'no' }) });
+        stacked(origins, data.top.journals.map(r => ({ year: r.name, total: ORIGIN_GROUPS.reduce((n, g) => n + (r.origin?.[g] || 0), 0), source: r.id, values: r.origin || {} })), originSeries(), { percentage: true, horizontal: true, unit: 'authorships', onClick: (y, s) => drill({ source: y.source, origin: s.id }) });
         journalTable(content);
     }
     else if (currentModule === 'repositories') {
@@ -825,10 +825,34 @@ function collaborationMap(grid, { title = 'Partner country map', note, includeHo
     };
     draw();
 }
+// Box plot of FWCI and percentile band of citations per work, by publication year. Used on the Citation impact tab
+// and on every journal page, with the same rules, so a journal reads against the whole portfolio.
+function distributionCharts(grid, { wide = false, owner = scopeName[filter.scope] } = {}) {
+    const min = 10, open = r => drill({ from: r.year, to: r.year });
+    const box = panel(grid, 'FWCI distribution by publication year (box plot)', `${owner} · spread of FWCI scores of the works in each publication year, after the same date checks as the FWCI timeline. A mean can be lifted by a few highly cited works; the median and box show where most works are. Years with fewer than ${min} works with FWCI are left empty; 10–29 works are a small base.`, wide);
+    boxPlot(box, data.fwci_timeline, { reference: 1, referenceLabel: 'FWCI 1 · global benchmark', unit: 'FWCI', onClick: open });
+    chartStory(box, distributionStory('fwci', data.fwci_timeline, data.current_year));
+    const band = panel(grid, 'Citations per work by publication year', `${owner} · cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower by construction. Years with fewer than ${min} works are left out; 10–29 works are a small base.`, wide);
+    percentileBand(band, data.citation_distribution, { unit: 'citations', onClick: open });
+    chartStory(band, distributionStory('citations', data.citation_distribution, data.current_year));
+}
+// Author origin: each authorship in one group (home institution, another institution in the home country, abroad,
+// not recorded). A 100% bar of all years, then 100% bars per publication year (or per journal).
+const possessive = name => name.endsWith('s') ? `${name}'` : `${name}'s`;
+const originSeries = () => [{ id: 'home', name: `${possessive(home())} authors` }, { id: 'national', name: `Other authors from ${manifest?.institution?.country || homeCountry()}` },
+    { id: 'international', name: 'International authors' }, { id: 'unknown', name: 'Affiliation not recorded' }].map(s => ({ ...s, color: ORIGIN_COLORS[s.id] }));
+const originNote = () => `Each author of each work counts once, in one group: ${home()} first, then another institution in ${manifest?.institution?.country || homeCountry()}, then an institution abroad (all countries together). Authors without an affiliation or country in OpenAlex are shown as not recorded. Click a bar to list the works with authors of that group.`;
+function originPanel(grid, { title = 'Author affiliation', wide = false, extra = {} } = {}) {
+    const series = originSeries(), origin = data.author_origin, p = panel(grid, title, originNote(), wide);
+    if (!origin.years.length) { empty(p); return; }
+    shareBar(p, series.map(s => ({ ...s, count: origin.total[s.id] })));
+    stacked(p, origin.years.map(r => ({ year: r.year, total: r.total, values: r.values })), series, { percentage: true, unit: 'authorships',
+        onClick: (y, s) => drill({ from: y.year, to: y.year, origin: s.id, ...extra }) });
+}
 function fwciTimeline(grid) {
     const rows = data.fwci_timeline, normalization = data.fwci_normalization;
     const p = panel(grid, 'FWCI timeline',
-        `${scopeName[filter.scope]} · mean FWCI by publication year after date and metric eligibility checks. Dashed line: global benchmark FWCI 1.`, true);
+        `${scopeName[filter.scope]} · mean FWCI by publication year after date and metric eligibility checks. Dashed line: global benchmark FWCI 1. The spread behind each mean is in the FWCI distribution box plot.`, true);
     p.node.classList.add('fwci-panel');
     const status = row => row.status === 'small_sample' ? 'Small metric base' : row.status === 'no_metric' ? 'Not available' : decimal(row.fwci);
     const description = row => `${row.year}: mean ${status(row)}${row.status === 'valid' ? ' FWCI' : ''} · ${num(row.fwci_n)} of ${num(row.count)} date-eligible works · coverage ${pct(row.coverage)}${row.year >= data.current_year ? ' · Year not complete' : ''}${row.year + 3 >= data.current_year ? ' · Citation window not complete' : ''}`;

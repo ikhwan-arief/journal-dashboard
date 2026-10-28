@@ -46,6 +46,16 @@ export const citingShard = id => Number(String(id).replace(/^W/, '')) % CITING_S
 export const CITING_FIELDS = ['id', 'doi', 'title', 'year', 'date', 'type', 'source', 'authors', 'author_count', 'oa', 'url'];
 // 'all' is the union of the institution's scopes; audit candidates are never part of it.
 export const INSTITUTION_SCOPES = ['affiliated', 'funded', 'published'];
+// Origin of one authorship, in one group only: the institution first, then the home country, then abroad.
+// An authorship with no institution or no institution country is 'unknown' (OpenAlex has no affiliation for it).
+export const ORIGIN_GROUPS = ['home', 'national', 'international', 'unknown'];
+export function authorshipOrigin(author, entities) {
+    if (author.home) return 'home';
+    const countries = (author.institutions || []).map(id => entities.institutions?.[id]?.country).filter(Boolean);
+    if (INSTITUTION.country_code && countries.includes(INSTITUTION.country_code)) return 'national';
+    return countries.length ? 'international' : 'unknown';
+}
+const emptyOrigin = () => ({ home: 0, national: 0, international: 0, unknown: 0 });
 export const validNumber = value => typeof value === 'number' && Number.isFinite(value);
 export const JOURNAL_METRIC_POLICY = {
     version: 1, citation_history_years: 10, small_base: 30,
@@ -213,12 +223,22 @@ export function journalWidgetData(journal, works, entities, manifest, dataset) {
         // [ISO code, name, works] for the widget's bubble map; the summary keeps the top 50 countries.
         countries: summary.top.countries.map(r => [r.id, r.name, r.count]),
         origin: { home: own.local, external: own.count - own.local },
+        // Authorships by origin group: total [home, national, international, unknown] and rows [year, total, ...groups].
+        origin_groups: { country: INSTITUTION.country_code, total: ORIGIN_GROUPS.map(g => summary.author_origin.total[g]),
+            years: summary.author_origin.years.map(r => [r.year, r.total, ...ORIGIN_GROUPS.map(g => r.values[g])]) },
         // SDG labels per article ([goal, score|null], highest score first) and unique works per goal for the journal.
         articles: summary.publications.slice(0, 20).map(w => ({ title: w.title, year: w.year, citations: w.citations, doi: w.doi || null, oa: w.oa_status,
             sdgs: (workSdgs(works.find(x => x.id === w.id) || {}) || []).map(g => [g.number, g.score]) })),
         sdgs: summary.top.sdgs.filter(r => /^(?:[1-9]|1[0-7])$/.test(r.id)).map(r => [Number(r.id), r.count]),
-        sdg_policy: { classifier: manifest.sdg?.classifier || 'unknown', scores: Boolean(manifest.sdg?.scores) } };
+        sdg_policy: { classifier: manifest.sdg?.classifier || 'unknown', scores: Boolean(manifest.sdg?.scores) },
+        // Box plot (FWCI) and percentile band (citations) per publication year, same rules as the dashboard:
+        // [year, works, P10, P25, median, P75, P90, max, mean, small base 0|1]; years with too few works are left out.
+        distributions: { min_works: DISTRIBUTION_POLICY.min_works, small_base_below: DISTRIBUTION_POLICY.small_base_below,
+            fwci: distributionRows(summary.fwci_timeline), citations: distributionRows(summary.citation_distribution),
+            story: { fwci: distributionStory('fwci', summary.fwci_timeline, currentYear), citations: distributionStory('citations', summary.citation_distribution, currentYear) } } };
 }
+const distributionRows = rows => rows.filter(r => r.distribution).map(({ year, distribution: d }) =>
+    [year, d.n, ...[d.p10, d.q1, d.median, d.q3, d.p90, d.max, d.mean].map(v => compact(v, 3)), d.small_base ? 1 : 0, compact(d.zero_share, 3), compact(d.above_one, 3)]);
 // Language codes from OpenAlex (ISO 639-1, e.g. "id") shown as English names ("Indonesian"); the code stays the filter ID.
 const LANGUAGES = (() => { try { return new Intl.DisplayNames(['en'], { type: 'language' }); } catch { return null; } })();
 export function languageName(code) {
@@ -294,6 +314,21 @@ export function median(values) {
     const sorted = [...values].sort((a, b) => a - b), mid = Math.floor(sorted.length / 2);
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
+// Linear-interpolation quantile (same as numpy/Excel PERCENTILE.INC) of an ascending array.
+export function quantile(sorted, p) {
+    if (!sorted.length) return null;
+    const i = (sorted.length - 1) * p, lo = Math.floor(i), hi = Math.min(lo + 1, sorted.length - 1);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+// Five-number summary for box plots and percentile bands; whiskers are P10 and P90, not 1.5×IQR,
+// because many works sit at zero and 1.5×IQR would flag almost every cited work as an outlier.
+export function distribution(values) {
+    const sorted = values.filter(validNumber).sort((a, b) => a - b);
+    if (!sorted.length) return null;
+    return { n: sorted.length, min: sorted[0], p10: quantile(sorted, .1), q1: quantile(sorted, .25), median: quantile(sorted, .5),
+        q3: quantile(sorted, .75), p90: quantile(sorted, .9), max: sorted.at(-1), mean: sorted.reduce((n, v) => n + v, 0) / sorted.length,
+        zero_share: sorted.filter(v => v === 0).length / sorted.length, above_one: sorted.filter(v => v > 1).length / sorted.length };
+}
 export function hIndex(values) {
     const sorted = [...values].sort((a, b) => b - a);
     return sorted.reduce((h, value, index) => value >= index + 1 ? index + 1 : h, 0);
@@ -356,6 +391,9 @@ export function matches(work, filter, entities, year = new Date().getFullYear())
     if (filter.local === 'yes' && !work.authors.some(a => a.home))
         return false;
     if (filter.local === 'no' && work.authors.some(a => a.home))
+        return false;
+    // Works with at least one authorship of that origin group.
+    if (filter.origin && !work.authors.some(a => authorshipOrigin(a, entities) === filter.origin))
         return false;
     if (filter.source && (work.source || 'unknown') !== filter.source)
         return false;
@@ -450,18 +488,26 @@ export function normalizedPublicationGrowth(works, yearRows, filter, currentYear
         input_count: works.length, retained_count: works.length - excludedCount,
         small_base_years: rows.filter(row => row.status === 'small_base').length, raw_rows: raw } };
 }
+// Distributions (box plot, percentile band) need fewer works than a mean line to be readable, so journal pages keep
+// most years: from 10 works a year is shown, and below the FWCI line base of 30 it is marked as a small base.
+export const DISTRIBUTION_POLICY = Object.freeze({ min_works: 10, small_base_below: 30 });
+function yearDistribution(values) {
+    if (values.length < DISTRIBUTION_POLICY.min_works) return null;
+    const d = distribution(values);
+    return d && { ...d, small_base: d.n < DISTRIBUTION_POLICY.small_base_below };
+}
 export const FWCI_POLICY = Object.freeze({ version: 1, min_works: 30, date_policy_version: GROWTH_POLICY.version,
     benchmark: 1, source: 'https://help.openalex.org/data/works/citations/' });
 export function normalizedAnnualFWCI(works, yearRows, filter, currentYear) {
-    const excluded = { invalid_year: 0, before_institution: 0, future_year: 0, epoch_date: 0 }, byYear = new Map();
+    const excluded = { invalid_year: 0, before_institution: 0, future_year: 0, epoch_date: 0 }, byYear = new Map(), scores = new Map();
     let missing = 0, invalid = 0;
     for (const work of works) {
         const reason = growthExclusion(work, currentYear);
         if (reason) { excluded[reason]++; continue; }
-        if (!byYear.has(work.year)) byYear.set(work.year, { id: String(work.year), count: 0, fwci_n: 0, fwci_sum: 0 });
+        if (!byYear.has(work.year)) { byYear.set(work.year, { id: String(work.year), count: 0, fwci_n: 0, fwci_sum: 0 }); scores.set(work.year, []); }
         const row = byYear.get(work.year);
         row.count++;
-        if (validNumber(work.fwci) && work.fwci >= 0) { row.fwci_n++; row.fwci_sum += work.fwci; }
+        if (validNumber(work.fwci) && work.fwci >= 0) { row.fwci_n++; row.fwci_sum += work.fwci; scores.get(work.year).push(work.fwci); }
         else if (work.fwci === null || work.fwci === undefined) missing++;
         else invalid++;
     }
@@ -469,12 +515,74 @@ export function normalizedAnnualFWCI(works, yearRows, filter, currentYear) {
     const last = filter.to ? Math.min(currentYear, Number(filter.to)) : '';
     const rows = annualFWCI([...byYear.values()], first, last).map(row => ({ ...row,
         observed_fwci: row.fwci, fwci: row.fwci_n >= FWCI_POLICY.min_works ? row.fwci : null,
+        distribution: yearDistribution(scores.get(row.year) || []),
         status: !row.fwci_n ? 'no_metric' : row.fwci_n < FWCI_POLICY.min_works ? 'small_sample' : 'valid' }));
     const excludedCount = Object.values(excluded).reduce((sum, count) => sum + count, 0);
     return { rows, normalization: { policy: FWCI_POLICY, date_policy: GROWTH_POLICY, excluded, excluded_count: excludedCount,
         input_count: works.length, retained_count: works.length - excludedCount, missing_fwci_count: missing, invalid_fwci_count: invalid,
         small_sample_years: rows.filter(row => row.status === 'small_sample').length,
         raw_rows: annualFWCI(yearRows, filter.from, filter.to) } };
+}
+// Cumulative citations per work by publication year, after the same date checks as the FWCI timeline.
+// Citations grow with age, so recent years sit lower by construction; this is not a quality ranking of years.
+export function annualCitationDistribution(works, filter, currentYear) {
+    const byYear = new Map();
+    for (const work of works) {
+        if (growthExclusion(work, currentYear) || !validNumber(work.citations) || work.citations < 0) continue;
+        if (!byYear.has(work.year)) byYear.set(work.year, []);
+        byYear.get(work.year).push(work.citations);
+    }
+    const from = Number(filter.from) || 0, to = Number(filter.to) || 9999;
+    return [...byYear].filter(([year]) => year >= from && year <= to).sort((a, b) => a[0] - b[0]).map(([year, values]) => ({
+        id: String(year), year, count: values.length,
+        distribution: yearDistribution(values),
+        status: values.length < DISTRIBUTION_POLICY.min_works ? 'too_few' : values.length < DISTRIBUTION_POLICY.small_base_below ? 'small_base' : 'valid' }));
+}
+// Plain-language reading of a distribution chart ("how to read this chart"), built from the same rows the chart
+// draws, so the dashboard, the journal pages, the widget and the iframe tell the same story. English, like the UI.
+export function distributionStory(kind, rows, currentYear) {
+    const shown = rows.filter(r => r.distribution);
+    if (!shown.length) return [];
+    const fwci = kind === 'fwci', digits = fwci ? 2 : 1;
+    const f = v => String(Number(v.toFixed(digits))), pc = v => `${Math.round(v * 100)}%`;
+    const span = list => list.length === 1 ? String(list[0].year) : `${list[0].year}–${list.at(-1).year}`;
+    // Consecutive years collapse into ranges: 2012, 2023–2026; the last two parts are joined with "and".
+    const yearsText = list => { const runs = []; for (const { year } of list) { const last = runs.at(-1); if (last && last[1] === year - 1) last[1] = year; else runs.push([year, year]); }
+        const parts = runs.map(([a, b]) => a === b ? String(a) : `${a}–${b}`); return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]; };
+    // Older years with a closed citation window and a full base are the fair ones to read; fall back if there are none.
+    const settled = r => fwci ? r.year + 3 < currentYear : r.year <= currentYear - 3;
+    const solid = shown.filter(r => !r.distribution.small_base), mature = (solid.length ? solid : shown).filter(settled);
+    const ref = mature.length ? mature : (solid.length ? solid : shown), d = r => r.distribution;
+    const lines = [], between = (a, b, fmt) => a === b ? fmt(a) : `${fmt(a)}–${fmt(b)}`;
+    const medians = ref.map(r => d(r).median), lo = Math.min(...medians), hi = Math.max(...medians), tops = ref.filter(r => d(r).median === hi);
+    const topYears = tops.length <= 3 ? `in ${yearsText(tops)}` : `in ${tops.length} of ${ref.length} years`;
+    if (fwci) {
+        const typical = `Typical work: for works published ${span(ref)}, the median FWCI is ${between(lo, hi, f)}`;
+        lines.push(hi === 0 ? `${typical}. In every year, half of the works or more were not cited within their four-year window (FWCI 1 = world average).`
+            : hi < 1 ? `${typical}. In every year, half of the works received at most ${pc(hi)} of the citations expected for similar works worldwide (FWCI 1 = world average).`
+            : `${typical}; ${topYears} at least half of the works are at or above the world average (FWCI 1).`);
+        const above = ref.map(r => d(r).above_one), top = ref.reduce((a, r) => d(r).above_one > d(a).above_one ? r : a);
+        lines.push(`Above the world average: ${between(Math.min(...above), Math.max(...above), pc)} of the works per year have an FWCI above 1${Math.min(...above) === Math.max(...above) ? '' : `, most in ${top.year} (${pc(d(top).above_one)})`}.`);
+        const zero = ref.reduce((n, r) => n + d(r).zero_share * d(r).n, 0) / ref.reduce((n, r) => n + d(r).n, 0);
+        if (zero >= .25) lines.push(`Not cited: on average ${pc(zero)} of these works have FWCI 0, meaning no citations within their four-year window. That is why many boxes start at 0.`);
+    } else {
+        lines.push(`Typical work: works published ${span(ref)} have a median of ${between(lo, hi, f)} citations each${lo === hi ? '' : `; the highest median (${f(hi)}) is ${topYears}`}.`);
+        const top = ref.reduce((a, r) => d(r).p90 > d(a).p90 ? r : a);
+        lines.push(`Most cited works: the top 10% of works published in ${top.year} have at least ${f(d(top).p90)} citations each, the highest P90 in the chart.`);
+        const fresh = []; for (const r of [...shown].reverse()) { if (d(r).zero_share >= .5) fresh.unshift(r); else break; }
+        if (fresh.length) lines.push(`Not yet cited: more than half of the works published ${span(fresh)} have no citations so far. This is expected for recent works and is not a sign of low quality.`);
+    }
+    // Mean above median: a few highly cited works lift the average.
+    const skewed = ref.filter(r => d(r).mean > d(r).median), gap = ref.reduce((a, r) => d(r).mean - d(r).median > d(a).mean - d(a).median ? r : a);
+    if (skewed.length && d(gap).mean - d(gap).median >= (fwci ? .1 : 1))
+        lines.push(`Mean versus median: the mean is above the median in ${skewed.length} of ${ref.length} years, because a few highly cited works pull the average up. The widest gap is ${gap.year}: mean ${f(d(gap).mean)}, median ${f(d(gap).median)}, top work ${f(d(gap).max)}. The median is the better guide to a typical work.`);
+    const open = shown.filter(r => !settled(r));
+    if (open.length) lines.push(fwci
+        ? `Still counting: works from ${yearsText(open)} have not completed their four-year citation window, so their values will rise. Do not compare them with older years yet.`
+        : `Recent years: works from ${yearsText(open)} have had less than three years to be cited, so their values will rise.`);
+    const small = shown.filter(r => d(r).small_base);
+    if (small.length) lines.push(`Small base: the values for ${yearsText(small)} are based on only 10–29 works (lighter box or hollow point), so read them with care.`);
+    return lines;
 }
 export function entityPage(works, entities, filter, manifest, options = {}) {
     if (!['authors', 'partners', 'funders', 'sources'].includes(options.kind))
@@ -536,7 +644,7 @@ export function summarize(works, entities, filter, manifest, history = [], table
     const qualityYears = Object.fromEntries(Object.keys(quality).map(k => [k, {}]));
     const versionLocations = new Map();
     const coverage = { abstract: 0, pdf: 0, xml: 0, repo: 0, any_repo: 0, license: 0, orcid_authors: 0 };
-    const citationYears = new Map(), oaYears = new Map(), sdgFields = new Map(), oaFields = new Map();
+    const citationYears = new Map(), oaYears = new Map(), sdgFields = new Map(), oaFields = new Map(), originYears = new Map(), originTotal = emptyOrigin();
     let citations = 0, oa = 0, international = 0, fwciSum = 0, fwciN = 0, eligible = 0, top10 = 0, top1 = 0, cited = 0;
     let apcSum = 0, apcN = 0, paidVerified = 0, paidFallback = 0;
     const localRepo = new Set(manifest.institution.repositories || []);
@@ -608,6 +716,9 @@ export function summarize(works, entities, filter, manifest, history = [], table
         add('oa', work.oa_status, work.oa_status, work);
         const sourceRow = add('sources', work.source, name('sources', work.source), work);
         sourceRow.local = (sourceRow.local || 0) + (work.authors.some(a => a.home) ? 1 : 0);
+        sourceRow.origin ||= emptyOrigin();
+        if (!originYears.has(work.year)) originYears.set(work.year, emptyOrigin());
+        for (const a of work.authors) { const group = authorshipOrigin(a, entities); sourceRow.origin[group]++; originYears.get(work.year)[group]++; originTotal[group]++; }
         sourceRow.metadata = entities.sources[work.source] || null;
         for (const id of new Set(work.countries)) {
             localCountries.add(id);
@@ -734,6 +845,10 @@ export function summarize(works, entities, filter, manifest, history = [], table
         top, annual_fwci: annualFWCI(top.years, filter.from, filter.to),
         publication_growth: growth.rows, growth_normalization: growth.normalization, histogram, quality, quality_years: qualityYears, coverage,
         fwci_timeline: fwci.rows, fwci_normalization: fwci.normalization,
+        citation_distribution: annualCitationDistribution(selected, filter, currentYear),
+        // Authorships by origin group (each author of each work counts once), in total and per publication year.
+        author_origin: { total: originTotal, years: [...originYears].filter(([year]) => validNumber(year) && !growthExclusion({ year }, currentYear))
+            .sort((a, b) => a[0] - b[0]).map(([year, values]) => ({ year, total: ORIGIN_GROUPS.reduce((n, g) => n + values[g], 0), values })) },
         country_map: sorted('countries').map(({ id, name, count, citations }) => ({ id, name, count, citations })),
         version_locations: [...versionLocations].map(([key, count]) => { const [version, type] = key.split('|'); return { version, type, count }; }),
         citation_years: [...citationYears].sort((a, b) => a[0] - b[0]),

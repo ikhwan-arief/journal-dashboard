@@ -63,7 +63,7 @@ function accessible(p, rows, onClick) {
         list.append(li);
     }
     detail.append(list);
-    p.node.append(detail);
+    p.body.after(detail);
 }
 function exportControl(p) {
     const button = el('button', { class: 'chart-export', type: 'button', 'aria-label': `Download chart ${p.title}` }, '↓ Image');
@@ -76,7 +76,7 @@ function exportControl(p) {
     };
     p.actions.append(button);
 }
-function chart(p, type, data, options = {}) {
+function chart(p, type, data, options = {}, extraPlugins = []) {
     if (!globalThis.Chart) {
         empty(p, 'The chart library could not be loaded. Reload the page.');
         return;
@@ -88,7 +88,7 @@ function chart(p, type, data, options = {}) {
         options = { ...options, interaction: { mode: 'nearest', axis: options.indexAxis === 'y' ? 'y' : 'x', intersect: false } };
     const plugins=options.plugins||{},tooltip=plugins.tooltip||{};
     options={...options,plugins:{...plugins,legend:{display:false,...plugins.legend},tooltip:{backgroundColor:CHART.primary,padding:11,cornerRadius:8,...tooltip,callbacks:{footer:()=>p.title.startsWith('History')?['Default filter of each snapshot']:[...(document.querySelector('.scope-line span')?.textContent?.split(' · ')||[]),document.querySelector('.scope-line strong')?.textContent||''],...tooltip.callbacks}}}};
-    const c = new Chart(canvas, { type, data, options: { responsive: true, maintainAspectRatio: false,
+    const c = new Chart(canvas, { type, data, plugins: extraPlugins, options: { responsive: true, maintainAspectRatio: false,
             animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { duration: 250 },
             font: { family: 'system-ui' }, plugins: { legend: { display: false }, tooltip: { backgroundColor: CHART.primary, padding: 11, cornerRadius: 8, callbacks: { footer: () => document.querySelector('.scope-line')?.textContent || '' } } },
             scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick } }, y: { beginAtZero: true, grid: { color: CHART.grid }, border: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick, precision: 0 } } }, ...options } });
@@ -147,6 +147,140 @@ export function line(p, rows, { onClick, value = 'count', label = 'Publications'
         } } },
         onClick: (_e, e) => e[0]?.datasetIndex === 0 && onClick?.(rows[e[0].index]), scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 12 } }, y: { beginAtZero: true, max: percent ? 100 : undefined, grid: { color: CHART.grid }, ticks: { font: { size: 9 } } } } });
     accessible(p, rows.map(r => ({ ...r, name: String(r.name ?? r.year ?? r.id), count: r[value], description: tooltip ? tooltip(r) : `${r.name??r.year??r.id}: ${Number.isFinite(r[value]) ? decimal.format(r[value]) + ' ' + (percent?'%':unit) : 'Not available'}` })), onClick);
+}
+// Distribution charts on stock Chart.js (no plugin file): rows are { year, distribution: { p10, q1, median, q3, p90, max, mean, n, small_base } }.
+// One colour per kind of value, the same in both charts. Only three hues are used because only three stay apart for
+// every reader when all marks are on screen together (checked for colour-vision deficiency); median and maximum are
+// neutral ink and are also told apart by shape, and every value is in the tooltip and the chart data list.
+// Author origin groups: three hues that stay apart for colour-vision deficiency, plus grey for "not recorded".
+export const ORIGIN_COLORS = Object.freeze({ home: '#2a78d6', national: '#1baf7a', international: '#eb6834', unknown: '#c4c9c6' });
+// One 100% bar of all years, with the count and share of each group written next to its swatch.
+export function shareBar(p, parts, { unit = 'authorships' } = {}) {
+    const total = parts.reduce((n, x) => n + x.count, 0), pctText = n => total ? `${decimal.format(n / total * 100)}%` : '—';
+    const box = el('div', { class: 'share-total' }), bar = el('div', { class: 'share-bar', role: 'img',
+        'aria-label': parts.map(x => `${x.name}: ${integer.format(x.count)} ${unit} (${pctText(x.count)})`).join('; ') });
+    for (const x of parts) if (x.count) { const seg = el('span', { title: `${x.name}: ${integer.format(x.count)} ${unit} (${pctText(x.count)})` }); seg.style.width = `${x.count / total * 100}%`; seg.style.background = x.color; bar.append(seg); }
+    const legend = el('ul', { class: 'dist-legend share-legend' });
+    for (const x of parts) {
+        const swatch = el('span', { class: 'dist-swatch band', 'aria-hidden': 'true' }); swatch.style.background = x.color;
+        const item = el('li'); item.append(swatch, el('span', {}, `${x.name}: `), el('strong', {}, pctText(x.count)), el('span', {}, ` (${integer.format(x.count)})`)); legend.append(item);
+    }
+    box.append(el('p', { class: 'share-caption' }, `All years · ${integer.format(total)} ${unit}`), bar, legend);
+    p.body.before(box);
+}
+// "How to read this chart": plain sentences under a chart.
+export function chartStory(p, lines, title = 'How to read this chart') {
+    if (!lines?.length) return;
+    const box = el('div', { class: 'chart-story' }), list = el('ul');
+    for (const line of lines) {
+        const [head, ...rest] = line.split(': '), item = el('li');
+        if (rest.length && head.length < 40) item.append(el('strong', {}, head + ': '), rest.join(': ')); else item.textContent = line;
+        list.append(item);
+    }
+    box.append(el('h3', {}, title), list);
+    p.node.append(box);
+}
+export const DIST_COLORS = Object.freeze({ inner: '#2a78d6', outer: '#1baf7a', mean: '#eb6834', median: '#1f2a25', max: '#7b8580', reference: '#7b8580' });
+const tint = (color, share) => mix(color, '#ffffff', 1 - share);   // opaque colour at `share` strength on white
+const niceCeil = v => { const m = 10 ** Math.floor(Math.log10(v)); return Math.ceil(v / m * 2) / 2 * m; };
+const fmt = v => decimal.format(v);
+function distributionLines(d, unit = '') {
+    if (!d) return ['Too few works for a distribution'];
+    return [`Median ${fmt(d.median)} · mean ${fmt(d.mean)}${unit ? ' ' + unit : ''}`, `P25–P75: ${fmt(d.q1)}–${fmt(d.q3)}`, `P10–P90: ${fmt(d.p10)}–${fmt(d.p90)}`,
+        `Maximum ${fmt(d.max)}`, `${integer.format(d.n)} works${d.small_base ? ' · small base' : ''}`];
+}
+// Legend as HTML under the chart: a swatch in the mark's own shape and colour, the label in text ink.
+function distributionLegend(p, items) {
+    const list = el('ul', { class: 'dist-legend' });
+    for (const [shape, color, label] of items) {
+        const swatch = el('span', { class: `dist-swatch ${shape}`, 'aria-hidden': 'true' });
+        swatch.style.setProperty('--swatch', color);
+        const item = el('li'); item.append(swatch, el('span', {}, label)); list.append(item);
+    }
+    p.body.after(list);
+}
+// Box plot: a floating bar per year for P25–P75; an inline plugin draws the P10–P90 whiskers, the median, the mean
+// and the maximum. The axis stops a little above the highest P90 so one extreme work does not flatten the boxes;
+// a maximum above the axis is a triangle at the top. Small-base years are drawn lighter with a dashed outline.
+export function boxPlot(p, rows, { reference = null, referenceLabel, unit = '', tooltip, onClick } = {}) {
+    const shown = rows.filter(r => r.distribution), C = DIST_COLORS;
+    if (!shown.length) { empty(p, 'Too few works per year for a distribution in this filter.'); return; }
+    rows = rows.slice(rows.indexOf(shown[0]), rows.indexOf(shown.at(-1)) + 1);   // trim empty ends, keep inner gaps
+    const top = niceCeil(Math.max(...shown.map(r => r.distribution.p90), Number.isFinite(reference) ? reference : 0) * 1.15 || 1);
+    const datasets = [{ label: 'P25–P75', data: rows.map(r => r.distribution ? [r.distribution.q1, r.distribution.q3] : null),
+        backgroundColor: rows.map(r => tint(C.inner, r.distribution?.small_base ? .15 : .35)), borderColor: C.inner, borderWidth: 1.5,
+        borderSkipped: false, borderRadius: 2, minBarLength: 2, maxBarThickness: 36 }];
+    if (Number.isFinite(reference)) datasets.push({ type: 'line', label: referenceLabel || `Reference ${reference}`, data: rows.map(() => reference),
+        borderColor: C.reference, borderDash: [6, 5], pointRadius: 0, borderWidth: 1.5, fill: false });
+    const marks = { id: 'boxMarks', afterDatasetsDraw(c) {
+        const { ctx, chartArea: area } = c, y = c.scales.y, py = v => y.getPixelForValue(Math.min(v, y.max));
+        ctx.save();
+        c.getDatasetMeta(0).data.forEach((box, i) => {
+            const d = rows[i].distribution, x = box.x, half = box.width / 2, tick = half * .55;
+            if (!d) return;
+            if (d.small_base) {   // dashed outline over the lighter box
+                ctx.setLineDash([3, 3]); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+                ctx.strokeRect(x - half, py(d.q3), half * 2, py(d.q1) - py(d.q3)); ctx.setLineDash([]);
+            }
+            ctx.strokeStyle = C.outer; ctx.lineWidth = 2; ctx.beginPath();
+            ctx.moveTo(x, py(d.q3)); ctx.lineTo(x, py(d.p90)); ctx.moveTo(x - tick, py(d.p90)); ctx.lineTo(x + tick, py(d.p90));
+            ctx.moveTo(x, py(d.q1)); ctx.lineTo(x, py(d.p10)); ctx.moveTo(x - tick, py(d.p10)); ctx.lineTo(x + tick, py(d.p10));
+            ctx.stroke();
+            ctx.strokeStyle = C.median; ctx.lineWidth = 3; ctx.beginPath();
+            ctx.moveTo(x - half, py(d.median)); ctx.lineTo(x + half, py(d.median)); ctx.stroke();
+            if (d.mean <= y.max) {   // mean: diamond with a white ring so it stays visible on the median line
+                const m = py(d.mean); ctx.beginPath();
+                ctx.moveTo(x, m - 5); ctx.lineTo(x + 5, m); ctx.lineTo(x, m + 5); ctx.lineTo(x - 5, m); ctx.closePath();
+                ctx.fillStyle = C.mean; ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
+            }
+            ctx.fillStyle = C.max; ctx.beginPath();
+            if (d.max > y.max) { ctx.moveTo(x, area.top); ctx.lineTo(x + 4.5, area.top + 8); ctx.lineTo(x - 4.5, area.top + 8); ctx.closePath(); }
+            else ctx.arc(x, py(d.max), 3, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.restore();
+    } };
+    const describe = r => tooltip ? tooltip(r) : `${r.year}: ${distributionLines(r.distribution, unit).join(' · ')}`;
+    chart(p, 'bar', { labels: rows.map(r => String(r.year)), datasets }, {
+        interaction: { mode: 'index', axis: 'x', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { filter: item => item.datasetIndex === 0, callbacks: {
+            label: c => distributionLines(rows[c.dataIndex].distribution, unit).map((line, i) => i === 3 && rows[c.dataIndex].distribution?.max > top ? line + ' (above the axis)' : line) } } },
+        onClick: (_e, e) => e[0] && rows[e[0].index].distribution && onClick?.(rows[e[0].index]),
+        onHover: (e, items) => { if (e.native?.target) e.native.target.style.cursor = items.length && onClick ? 'pointer' : 'default'; },
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick } },
+            y: { beginAtZero: true, max: top, grid: { color: CHART.grid }, border: { display: false }, ticks: { font: { size: 9 }, color: CHART.tick } } } }, [marks]);
+    accessible(p, shown.map(r => ({ ...r, name: String(r.year), description: describe(r) })), onClick);
+    distributionLegend(p, [['box', C.inner, 'Box: middle 50% of works (P25–P75)'], ['whisker', C.outer, 'Whiskers: middle 80% (P10–P90)'],
+        ['bar', C.median, 'Median'], ['diamond', C.mean, 'Mean'], ['dot', C.max, 'Maximum (▲ above the axis)'],
+        ...(Number.isFinite(reference) ? [['dash', C.reference, referenceLabel || 'Reference']] : []), ['box faint', C.inner, 'Lighter, dashed box: small base']]);
+}
+// Percentile band: median line inside a P25–P75 band and a lighter P10–P90 band, with the mean dashed for comparison.
+// Small-base years have a hollow median point. Chart.js draws higher `order` first, so the bands go under the lines.
+export function percentileBand(p, rows, { unit = '', tooltip, onClick } = {}) {
+    const shown = rows.filter(r => r.distribution), C = DIST_COLORS;
+    if (!shown.length) { empty(p, 'Too few works per year for a distribution in this filter.'); return; }
+    rows = rows.slice(rows.indexOf(shown[0]), rows.indexOf(shown.at(-1)) + 1);   // trim empty ends, keep inner gaps
+    const v = key => rows.map(r => r.distribution?.[key] ?? null), edge = { borderColor: 'transparent', pointRadius: 0, pointHitRadius: 0, tension: .25 };
+    const datasets = [
+        { ...edge, label: 'P90', data: v('p90'), fill: false, order: 5 },
+        { ...edge, label: 'P10–P90', data: v('p10'), backgroundColor: tint(C.outer, .22), fill: '-1', order: 4 },
+        { ...edge, label: 'P75', data: v('q3'), fill: false, order: 3 },
+        { ...edge, label: 'P25–P75', data: v('q1'), backgroundColor: tint(C.inner, .4), fill: '-1', order: 2 },
+        { label: 'Median', order: 0, data: v('median'), borderColor: C.median, borderWidth: 2, tension: .25, fill: false, pointRadius: 3.5, pointHoverRadius: 6,
+            pointBackgroundColor: rows.map(r => r.distribution?.small_base ? '#ffffff' : C.median), pointBorderColor: C.median, pointBorderWidth: 1.5 },
+        { label: 'Mean', order: 1, data: v('mean'), borderColor: C.mean, borderDash: [5, 4], borderWidth: 2, pointRadius: 0, tension: .25, fill: false },
+    ];
+    const describe = r => tooltip ? tooltip(r) : `${r.year}: ${distributionLines(r.distribution, unit).join(' · ')}`;
+    chart(p, 'line', { labels: rows.map(r => String(r.year)), datasets }, {
+        interaction: { mode: 'index', axis: 'x', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { filter: item => item.datasetIndex === 4, callbacks: {
+            label: c => distributionLines(rows[c.dataIndex].distribution, unit) } } },
+        onClick: (_e, e) => e[0] && rows[e[0].index].distribution && onClick?.(rows[e[0].index]),
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, color: CHART.tick, maxTicksLimit: 12 } },
+            y: { beginAtZero: true, grid: { color: CHART.grid }, border: { display: false }, ticks: { font: { size: 9 }, color: CHART.tick } } } });
+    accessible(p, shown.map(r => ({ ...r, name: String(r.year), description: describe(r) })), onClick);
+    distributionLegend(p, [['band', C.inner, 'Middle 50% of works (P25–P75)'], ['band outer', C.outer, 'Middle 80% (P10–P90)'],
+        ['line', C.median, 'Median'], ['dash', C.mean, 'Mean'], ['ring', C.median, 'Hollow point: small base']]);
 }
 export function timelineYears(rows, availableYears, range = '10', { individual = false, omitEmpty = false } = {}) {
     const activeYears = [...new Set(availableYears)].filter(year => rows.some(row => row.years[year] > 0)).sort((a, b) => a - b);
@@ -282,7 +416,7 @@ export function donut(p, rows, onClick) {
     chart(p, 'doughnut', { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => r.count), backgroundColor: rows.map((r, i) => r.color || colorFor(r.id, i)), borderColor: '#fff', borderWidth: 3 }] }, { cutout: '72%', scales: {}, plugins: { legend: { display: true, position: 'right', labels: { boxWidth: 9, boxHeight: 9, usePointStyle: true, padding: 14, font: { size: 10 } } }, tooltip: { backgroundColor: CHART.primary, padding: 10, callbacks: { label: c => `${c.label}: ${integer.format(c.raw)} works / ${integer.format(total)} (${decimal.format(total ? c.raw / total * 100 : 0)}%)` } } }, onClick: (_e, e) => e[0] && onClick?.(rows[e[0].index]) });
     accessible(p, rows, onClick);
 }
-export function stacked(p, years, series, { percentage = false, horizontal = false, onClick } = {}) {
+export function stacked(p, years, series, { percentage = false, horizontal = false, onClick, unit = 'works' } = {}) {
     if (!years.length) {
         empty(p);
         return;
@@ -294,12 +428,12 @@ export function stacked(p, years, series, { percentage = false, horizontal = fal
         ticks: { font: { size: 9 }, callback: percentage ? value => value + '%' : undefined } };
     chart(p, 'bar', { labels: years.map(y => y.year), datasets: series.map((s, i) => ({ label: s.name,
             data: years.map(y => percentage ? (y.total ? ((y.values[s.id] || 0) / y.total) * 100 : 0) : y.values[s.id] || 0),
-            backgroundColor: colorFor(s.id, i), maxBarThickness: 45, borderRadius: 2 })) }, { indexAxis: horizontal ? 'y' : 'x', scales: { x: horizontal ? valueAxis : categoryAxis, y: horizontal ? categoryAxis : valueAxis },
-        plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, font: { size: 9 }, padding: 10 } }, tooltip: { backgroundColor: CHART.primary, callbacks: { label: c => { const y = years[c.dataIndex], s = series[c.datasetIndex]; return `${s.name}: ${integer.format(y.values[s.id] || 0)} works / ${integer.format(y.total)}${percentage ? ' · ' + decimal.format(c.raw) + '%' : ''}`; } } } },
+            backgroundColor: s.color || colorFor(s.id, i), maxBarThickness: 45, borderRadius: 2 })) }, { indexAxis: horizontal ? 'y' : 'x', scales: { x: horizontal ? valueAxis : categoryAxis, y: horizontal ? categoryAxis : valueAxis },
+        plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, font: { size: 9 }, padding: 10 } }, tooltip: { backgroundColor: CHART.primary, callbacks: { label: c => { const y = years[c.dataIndex], s = series[c.datasetIndex]; return `${s.name}: ${integer.format(y.values[s.id] || 0)} ${unit} / ${integer.format(y.total)}${percentage ? ' · ' + decimal.format(c.raw) + '%' : ''}`; } } } },
         onClick: (_e, e) => { if (e[0])
             onClick?.(years[e[0].index], series[e[0].datasetIndex]); } });
     accessible(p, years.flatMap(y => series.map(s => ({ name: `${y.year} · ${s.name}`, count: y.values[s.id] || 0,
-        description: `${y.year} · ${s.name}: ${integer.format(y.values[s.id] || 0)} of ${integer.format(y.total)} works${percentage ? ' · ' + decimal.format(y.total ? (y.values[s.id] || 0) / y.total * 100 : 0) + '%' : ''}`,
+        description: `${y.year} · ${s.name}: ${integer.format(y.values[s.id] || 0)} of ${integer.format(y.total)} ${unit}${percentage ? ' · ' + decimal.format(y.total ? (y.values[s.id] || 0) / y.total * 100 : 0) + '%' : ''}`,
         year: y, series: s }))), onClick ? r => onClick(r.year, r.series) : undefined);
 }
 export function scatter(p, rows, { x = 'count', y = 'citations', xTitle = 'Publications', yTitle = 'Citations', onClick, bubble = false, colorOf } = {}) {

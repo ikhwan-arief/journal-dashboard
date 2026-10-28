@@ -34,6 +34,16 @@
         sdgCard: 'SDGs of journal works', sdgIcons: 'SDG icons: United Nations,', sdgNote: 'Unique works per goal; a work can count for several goals. Automatic OpenAlex classification, not a measure of impact.', score: 'classifier confidence', noSdg: 'No SDG labels on this journal\'s works yet.', country: 'Country', moreGoals: n => `${n} more goals are listed in the values table.`, mapLoading: 'Loading map…', noCountries: 'No affiliation countries on this journal\'s works yet.',
         mapMissing: list => `Not on the map: ${list}.`, mapNote: 'Bubble size is proportional to the number of works; hover or tap to see values',
         sdgNames: ['No poverty', 'Zero hunger', 'Good health and well-being', 'Quality education', 'Gender equality', 'Clean water and sanitation', 'Affordable and clean energy', 'Decent work and economic growth', 'Industry, innovation and infrastructure', 'Reduced inequalities', 'Sustainable cities and communities', 'Responsible consumption and production', 'Climate action', 'Life below water', 'Life on land', 'Peace, justice and strong institutions', 'Partnerships for the goals'],
+        distTitle: 'Spread across works', distFwci: 'FWCI distribution by publication year', distCitations: 'Citations per work by publication year',
+        distFwciNote: (min) => `Spread of FWCI scores of the journal's works per publication year. A few highly cited works can lift the mean; the median and box show where most works are. Years with fewer than ${min} works are left out.`,
+        distCitationsNote: (min) => `Cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower. Years with fewer than ${min} works are left out.`,
+        distTip: (y, d) => `${y} · median ${dec(d.median)} · mean ${dec(d.mean)} · P25–P75 ${dec(d.q1)}–${dec(d.q3)} · P10–P90 ${dec(d.p10)}–${dec(d.p90)} · max ${dec(d.max)} · ${num(d.n)} works${d.small ? ' · small base' : ''}`,
+        storyTitle: 'How to read this chart',
+        originTitle: 'Author affiliation', allYears: n => `All years · ${n} authorships`, authorships: ' authorships',
+        originGroups: (h, country) => [`${h.endsWith('s') ? h + "'" : h + "'s"} authors`, `Other authors from ${country}`, 'International authors', 'Affiliation not recorded'],
+        originGroupNote: (h, country) => `Each author of each work counts once, in one group: ${h} first, then another institution in ${country}, then an institution abroad (all countries together). Authors without an affiliation or country in OpenAlex are shown as not recorded.`,
+        distHead: ['Year', 'Works', 'P10', 'P25', 'Median', 'P75', 'P90', 'Max', 'Mean'],
+        legBox: 'Middle 50% (P25–P75)', legWhisker: 'Middle 80% (P10–P90)', legOuter: 'Middle 80% (P10–P90)', legMedian: 'Median', legMean: 'Mean', legMax: 'Maximum (▲ above axis)', legSmall: n => `Lighter: small base (under ${n} works)`, legHollow: n => `Hollow point: small base (under ${n} works)`, legRef: 'FWCI 1 benchmark',
         footer: n => `Top ${n} works by citations. Indicators are computed from OpenAlex metadata (CC0); they are not official values of any index provider.` };
     const nf = new Intl.NumberFormat(S.locale), df = new Intl.NumberFormat(S.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const num = v => v === null || v === undefined ? '—' : nf.format(v), dec = v => v === null || v === undefined ? S.na : df.format(v);
@@ -54,6 +64,8 @@
 .uam-years th,.uam-years td{padding:4px 6px;font-size:.85em;text-align:right;white-space:nowrap}.uam-years th:first-child{text-align:left}
 .uam-wide{grid-column:1/-1}.uam-map{aspect-ratio:960/420;min-height:120px}.uam-map svg{height:auto}.uam .uam-origin-donut{display:block;width:180px;max-width:100%;margin:0 auto}.uam-sdg{display:inline-block;min-width:1.7em;margin:1px 2px 1px 0;padding:0 5px;border:1px solid var(--uam-accent);border-radius:9px;font-size:.8em;text-align:center;color:var(--uam-accent)}
 .uam-sdg-list{display:grid;gap:5px;margin:6px 0}.uam-sdg-row{display:grid;grid-template-columns:32px 1fr 3.5em;gap:10px;align-items:center}.uam-sdg-row img{display:block;width:32px;height:32px}.uam-sdg-label{display:grid;gap:3px;min-width:0;font-size:.82em}.uam-sdg-label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uam-sdg-label b{display:block;height:8px;border-radius:4px;background:rgba(128,128,128,.18)}.uam-sdg-label i{display:block;height:100%;border-radius:4px;min-width:2px}
+.uam-story{margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(128,128,128,.09);font-size:.85em;line-height:1.5}.uam-story ul{margin:4px 0 0;padding-left:1.1em}.uam-story li+li{margin-top:2px}
+.uam-share{display:flex;gap:2px;height:14px;border-radius:4px;overflow:hidden;margin:4px 0 2px}.uam-share span{display:block;height:100%;min-width:2px}.uam dt i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 .uam td.n,.uam th.n{text-align:right;white-space:nowrap}.uam-scroll{overflow-x:auto}.uam details{margin-top:6px;font-size:.85em}.uam summary{cursor:pointer}`;
     const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) v !== undefined && v !== null && n.setAttribute(k, v); n.append(...kids.filter(k => k !== null && k !== undefined)); return n; };
     // Hover/tap text lives in data-tip and is shown by the widget's own tooltip (instant, also on touch).
@@ -103,23 +115,89 @@
         xLabels(s, rows.map(r => r.x), i => L + slot * (i + .5));
         return s;
     }
+    // Distribution charts (same colours as the dashboard): blue = middle 50%, green = middle 80%, orange = mean.
+    // Median and maximum use the host's text colour, so they stay visible on light and dark themes.
+    const DIST = { inner: '#2a78d6', outer: '#1baf7a', mean: '#eb6834' };
+    const ORIGIN = ['#2a78d6', '#1baf7a', '#eb6834', '#c4c9c6'];   // same as the dashboard: home, national, abroad, not recorded
+    const storyBox = lines => lines?.length ? el('div', { class: 'uam-story' }, el('strong', {}, S.storyTitle),
+        el('ul', {}, ...lines.map(line => { const [head, ...rest] = line.split(': '); return rest.length && head.length < 40 ? el('li', {}, el('b', {}, head + ': '), rest.join(': ')) : el('li', {}, line); }))) : null;
+    const distRows = rows => (rows || []).map(([year, n, p10, q1, median, q3, p90, max, mean, small]) => ({ year, n, p10, q1, median, q3, p90, max, mean, small: Boolean(small) }));
+    // One slot per year from the first to the last shown year, so missing years stay visible as gaps.
+    const yearSlots = rows => { const by = new Map(rows.map(r => [r.year, r])), a = rows[0].year, b = rows.at(-1).year; return Array.from({ length: b - a + 1 }, (_, i) => ({ year: a + i, d: by.get(a + i) || null })); };
+    const niceTop = v => { const m = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil(v / m * 2) / 2 * m; };
+    function distLegend(items) {
+        const legend = el('div', { class: 'uam-legend' });
+        for (const [style, label] of items) { const box = el('i'); box.setAttribute('style', style); legend.append(el('span', {}, box, label)); }
+        return legend;
+    }
+    function boxChart(rows, { label, reference = null }) {
+        const slots = yearSlots(rows), maxY = niceTop(Math.max(...rows.map(r => r.p90), reference ?? 0) * 1.15);
+        const s = frame(label, maxY), slot = (W - L - R) / slots.length, y = v => T + (H - T - B) * (1 - Math.min(v, maxY) / maxY), half = Math.min(slot * .32, 14);
+        if (reference !== null) s.append(svg('line', { x1: L, x2: W - R, y1: y(reference), y2: y(reference), stroke: 'currentColor', 'stroke-dasharray': '4 3', 'stroke-opacity': .55 }));
+        slots.forEach(({ year, d }, i) => {
+            if (!d) return;
+            const x = L + slot * (i + .5), tick = half * .6;
+            s.append(svg('path', { d: `M${x},${y(d.q3)}V${y(d.p90)}M${x - tick},${y(d.p90)}H${x + tick}M${x},${y(d.q1)}V${y(d.p10)}M${x - tick},${y(d.p10)}H${x + tick}`, stroke: DIST.outer, 'stroke-width': 1.6, fill: 'none' }));
+            s.append(svg('rect', { x: x - half, y: y(d.q3), width: half * 2, height: Math.max(y(d.q1) - y(d.q3), 1.5), rx: 1.5, fill: DIST.inner, 'fill-opacity': d.small ? .14 : .32, stroke: DIST.inner, 'stroke-width': 1.2, 'stroke-dasharray': d.small ? '3 2' : null }));
+            s.append(svg('line', { x1: x - half, x2: x + half, y1: y(d.median), y2: y(d.median), stroke: 'currentColor', 'stroke-width': 2.5 }));
+            if (d.mean <= maxY) { const m = y(d.mean); s.append(svg('path', { d: `M${x},${m - 4}L${x + 4},${m}L${x},${m + 4}L${x - 4},${m}Z`, fill: DIST.mean })); }
+            s.append(d.max > maxY ? svg('path', { d: `M${x},${T - 2}l3.5,6h-7z`, fill: 'currentColor', 'fill-opacity': .55 }) : svg('circle', { cx: x, cy: y(d.max), r: 2.2, fill: 'currentColor', 'fill-opacity': .55 }));
+        });
+        slots.forEach(({ year, d }, i) => s.append(svg('rect', { x: L + slot * i, y: T, width: slot, height: H - T - B, fill: 'transparent', class: 'uam-hit' }, d ? S.distTip(year, d) : `${year}: ${S.na}`)));
+        xLabels(s, slots.map(r => r.year), i => L + slot * (i + .5));
+        return s;
+    }
+    function bandChart(rows, { label }) {
+        const slots = yearSlots(rows), maxY = Math.max(...rows.map(r => r.p90), 1e-9) * 1.1, s = frame(label, maxY);
+        const x = i => L + (W - L - R) * (slots.length === 1 ? .5 : i / (slots.length - 1)), y = v => T + (H - T - B) * (1 - v / maxY);
+        // Contiguous runs of years with data; each run gets its own band and line, so gaps stay open.
+        const runs = []; slots.forEach((r, i) => { if (!r.d) return; const last = runs.at(-1); if (last && last.at(-1).i === i - 1) last.push({ ...r, i }); else runs.push([{ ...r, i }]); });
+        const area = (run, hi, lo) => 'M' + run.map(r => `${x(r.i).toFixed(1)},${y(r.d[hi]).toFixed(1)}`).join('L') + 'L' + [...run].reverse().map(r => `${x(r.i).toFixed(1)},${y(r.d[lo]).toFixed(1)}`).join('L') + 'Z';
+        const path = (run, key) => 'M' + run.map(r => `${x(r.i).toFixed(1)},${y(r.d[key]).toFixed(1)}`).join('L');
+        for (const run of runs) {
+            s.append(svg('path', { d: area(run, 'p90', 'p10'), fill: DIST.outer, 'fill-opacity': .22 }));
+            s.append(svg('path', { d: area(run, 'q3', 'q1'), fill: DIST.inner, 'fill-opacity': .4 }));
+            s.append(svg('path', { d: path(run, 'mean'), fill: 'none', stroke: DIST.mean, 'stroke-width': 1.8, 'stroke-dasharray': '4 3' }));
+            s.append(svg('path', { d: path(run, 'median'), fill: 'none', stroke: 'currentColor', 'stroke-width': 2 }));
+            for (const r of run) s.append(svg('circle', { cx: x(r.i), cy: y(r.d.median), r: 2.8, fill: r.d.small ? '#fff' : 'currentColor', stroke: 'currentColor', 'stroke-width': 1.2 }));
+        }
+        const col = (W - L - R) / Math.max(slots.length - 1, 1);
+        slots.forEach(({ year, d }, i) => s.append(svg('rect', { x: x(i) - col / 2, y: T, width: col, height: H - T - B, fill: 'transparent', class: 'uam-hit' }, d ? S.distTip(year, d) : `${year}: ${S.na}`)));
+        xLabels(s, slots.map(r => r.year), x);
+        return s;
+    }
+    function distributionSection(data) {
+        const dist = data.distributions;
+        if (!dist) return null;   // journal file from before this feature
+        const fwci = distRows(dist.fwci), cites = distRows(dist.citations), small = dist.small_base_below, cards = [];
+        const table = rows => numbers(S.distHead, rows.map(r => [r.year, num(r.n), ...[r.p10, r.q1, r.median, r.q3, r.p90, r.max, r.mean].map(dec)]));
+        const sw = { box: `background:${DIST.inner}55;border:1px solid ${DIST.inner}`, whisker: `background:none;border-top:2px solid ${DIST.outer};border-bottom:2px solid ${DIST.outer};height:8px`,
+            outer: `background:${DIST.outer}38`, inner: `background:${DIST.inner}66`, median: 'background:currentColor;height:3px', mean: `background:${DIST.mean};transform:rotate(45deg);width:8px;height:8px`,
+            meanLine: `background:none;border-top:2px dashed ${DIST.mean};height:0`, max: 'background:currentColor;opacity:.55;border-radius:50%;width:7px;height:7px', ref: 'background:none;border-top:2px dashed currentColor;opacity:.55;height:0',
+            small: `background:${DIST.inner}24;border:1px dashed ${DIST.inner}`, hollow: 'background:#fff;border:1.5px solid currentColor;border-radius:50%;width:8px;height:8px' };
+        if (fwci.length) cards.push(card(S.distFwci, S.distFwciNote(dist.min_works), boxChart(fwci, { label: S.distFwci, reference: 1 }),
+            distLegend([[sw.box, S.legBox], [sw.whisker, S.legWhisker], [sw.median, S.legMedian], [sw.mean, S.legMean], [sw.max, S.legMax], [sw.ref, S.legRef], [sw.small, S.legSmall(small)]]), storyBox(dist.story?.fwci), table(fwci)));
+        if (cites.length) cards.push(card(S.distCitations, S.distCitationsNote(dist.min_works), bandChart(cites, { label: S.distCitations }),
+            distLegend([[sw.inner, S.legBox], [sw.outer, S.legOuter], [sw.median, S.legMedian], [sw.meanLine, S.legMean], [sw.hollow, S.legHollow(small)]]), storyBox(dist.story?.citations), table(cites)));
+        return cards.length ? [el('h3', {}, S.distTitle), el('div', { class: 'uam-grid' }, ...cards)] : null;
+    }
     const shades = n => Array.from({ length: n }, (_, i) => i < 3 ? { c: 'var(--uam-accent)', o: [1, .62, .34][i] } : { c: 'currentColor', o: [.5, .3, .18][(i - 3) % 3] });
-    function stackedChart(rows, names, { label, percent }) {
-        const colors = shades(names.length), maxY = percent ? 100 : Math.max(...rows.map(r => r[1]), 1) * 1.1;
+    function stackedChart(rows, names, { label, percent, colors: fixed, unit }) {
+        const colors = fixed ? fixed.map(c => ({ c, o: 1 })) : shades(names.length), maxY = percent ? 100 : Math.max(...rows.map(r => r[1]), 1) * 1.1;
         const s = frame(label, maxY), slot = (W - L - R) / rows.length, scale = v => (H - T - B) * v / maxY;
         rows.forEach((r, i) => {
             let top = H - B;
             names.forEach((name, j) => {
                 const v = percent ? (r[1] ? r[j + 2] / r[1] * 100 : 0) : r[j + 2], h = scale(v);
-                if (h > 0) s.append(svg('rect', { x: L + slot * i + slot * .12, y: top - h, width: slot * .76, height: h, fill: colors[j].c, 'fill-opacity': colors[j].o }, `${r[0]} · ${name}: ${S.of(num(r[j + 2]), num(r[1]))}`));
+                if (h > 0) s.append(svg('rect', { x: L + slot * i + slot * .12, y: top - h, width: slot * .76, height: h, fill: colors[j].c, 'fill-opacity': colors[j].o }, `${r[0]} · ${name}: ${unit ? `${num(r[j + 2])} of ${num(r[1])}${unit}` : S.of(num(r[j + 2]), num(r[1]))}${percent && r[1] ? ` (${df.format(r[j + 2] / r[1] * 100)}%)` : ''}`));
                 top -= h;
             });
         });
         rows.forEach((r, i) => s.append(svg('rect', { x: L + slot * i, y: T, width: slot, height: H - T - B, fill: 'transparent', class: 'uam-hit' },
-            `${r[0]} · ${names.map((name, j) => `${name}: ${percent && r[1] ? df.format(r[j + 2] / r[1] * 100) + '%' : num(r[j + 2])}`).join(' · ')} · ${S.totalWorks(num(r[1]))}`)));
+            `${r[0]} · ${names.map((name, j) => `${name}: ${percent && r[1] ? df.format(r[j + 2] / r[1] * 100) + '%' : num(r[j + 2])}`).join(' · ')} · ${unit ? `total ${num(r[1])}${unit}` : S.totalWorks(num(r[1]))}`)));
         xLabels(s, rows.map(r => r[0]), i => L + slot * (i + .5));
         const legend = el('div', { class: 'uam-legend' });
-        names.forEach((name, j) => { const box = el('i'); box.style.background = colors[j].c.startsWith('var') ? 'var(--uam-accent)' : 'currentColor'; box.style.opacity = colors[j].o; legend.append(el('span', {}, box, name)); });
+        names.forEach((name, j) => { const box = el('i'); box.style.background = fixed ? colors[j].c : colors[j].c.startsWith('var') ? 'var(--uam-accent)' : 'currentColor'; box.style.opacity = colors[j].o; legend.append(el('span', {}, box, name)); });
         return [s, legend];
     }
     // Label column grows with the chart (about 6 px per character at 0.72em), so wide cards keep full names.
@@ -265,6 +343,9 @@
             kpis.append(el('div', { class: 'uam-card' }, el('small', {}, label), el('div', { class: 'uam-value' }, value), el('small', {}, note)));
         root.append(kpis, el('h3', {}, S.impact));
         root.append(metricSection(data, el('div'), data.years.includes(Number(mount.dataset.uamYear)) ? Number(mount.dataset.uamYear) : data.default_year, mount));
+        // Box plot of FWCI and percentile band of citations, as on the dashboard journal page.
+        const spread = distributionSection(data);
+        if (spread) root.append(...spread);
         const grid = el('div', { class: 'uam-grid' });
         grid.append(card(S.types, null, ...stackedChart(data.types.rows, data.types.names, { label: S.types })),
             card(S.access, S.accessNote, ...stackedChart(data.access.rows, data.access.names, { label: S.access, percent: true })));
@@ -281,9 +362,21 @@
             '. The content of this publication has not been approved by the United Nations and does not reflect the views of the United Nations or its officials or Member States.');
         grid.append(card(S.sdgCard, S.sdgNote, ...(sdgRows.length ? [sdgList(), sdgRows.length > 8 ? el('p', { class: 'uam-note' }, S.moreGoals(sdgRows.length - 8)) : null, sdgNotice(),
             numbers(['SDG', S.works], sdgRows.map(([name, count]) => [name, num(count)]))] : [el('p', {}, S.noSdg)])));
-        const o = data.origin, total = o.home + o.external, share = total ? o.home / total * 100 : 0;
-        grid.append(card(S.origin, S.originNote(h), ...originDonut(o.home, o.external, h),
-            el('dl', {}, el('dt', {}, S.home(h)), el('dd', {}, `${num(o.home)} (${pct(share)})`), el('dt', {}, S.external(h)), el('dd', {}, `${num(o.external)} (${pct(total ? 100 - share : null)})`))));
+        const g = data.origin_groups;
+        if (g?.years?.length) {
+            // Authorships by origin group: one 100% bar of all years, then one per publication year.
+            const country = new Intl.DisplayNames([S.locale], { type: 'region' }).of(g.country || 'ID'), names = S.originGroups(h, country), sum = g.total.reduce((n, v) => n + v, 0);
+            const totalBar = el('div', { class: 'uam-share', role: 'img', 'aria-label': names.map((n, i) => `${n}: ${num(g.total[i])} (${pct(sum ? g.total[i] / sum * 100 : null)})`).join('; ') });
+            g.total.forEach((v, i) => { if (!v) return; const seg = el('span', { 'data-tip': `${names[i]}: ${num(v)}${S.authorships} (${pct(v / sum * 100)})` }); seg.style.width = `${v / sum * 100}%`; seg.style.background = ORIGIN[i]; totalBar.append(seg); });
+            const dl = el('dl'); names.forEach((n, i) => { const sw = el('i'); sw.style.background = ORIGIN[i]; dl.append(el('dt', {}, sw, n), el('dd', {}, `${pct(sum ? g.total[i] / sum * 100 : null)} (${num(g.total[i])})`)); });
+            const [chart, legend] = stackedChart(g.years, names, { label: S.originTitle, percent: true, colors: ORIGIN, unit: S.authorships });
+            grid.append(card(S.originTitle, S.originGroupNote(h, country), el('small', {}, S.allYears(num(sum))), totalBar, dl, chart, legend,
+                numbers([S.year, ...names], g.years.map(r => [r[0], ...r.slice(2).map(v => `${num(v)} (${pct(r[1] ? v / r[1] * 100 : null)})`)]))));
+        } else {   // journal file from before the origin groups
+            const o = data.origin, total = o.home + o.external, share = total ? o.home / total * 100 : 0;
+            grid.append(card(S.origin, S.originNote(h), ...originDonut(o.home, o.external, h),
+                el('dl', {}, el('dt', {}, S.home(h)), el('dd', {}, `${num(o.home)} (${pct(share)})`), el('dt', {}, S.external(h)), el('dd', {}, `${num(o.external)} (${pct(total ? 100 - share : null)})`))));
+        }
         // Contributor countries as a full-width bubble map at the bottom (bubble area ∝ works).
         const mapCard = card(S.countries, S.countriesNote);
         mapCard.classList.add('uam-wide');
