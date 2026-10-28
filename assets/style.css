@@ -2037,3 +2037,15 @@ dialog p {
 .share-legend strong {
   color:var(--text, #25332d)
 }
+
+/* Records known only from Crossref. */
+.source-tag {
+  display:inline-block;
+  margin-left:6px;
+  padding:1px 6px;
+  border:1px solid #eb6834;
+  border-radius:9px;
+  font-size:9px;
+  color:#a6431b;
+  vertical-align:1px
+}

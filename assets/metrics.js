@@ -41,7 +41,10 @@ export function workSdgs(work) {
 export const BINS = [[0, 0, '0 citations'], [1, 5, '1–5'], [6, 10, '6–10'], [11, 50, '11–50'], [51, 100, '51–100'], [101, Infinity, '>100']];
 // Citing works are stored in shards keyed by the cited work, so build and browser locate them the same way.
 export const CITING_SHARDS = 256, CITING_OWN_FILE = 1000;
-export const citingShard = id => Number(String(id).replace(/^W/, '')) % CITING_SHARDS;
+// OpenAlex W-ids and Crossref-only X-ids both end in digits; the leading letter is dropped.
+export const citingShard = id => Number(String(id).replace(/^[A-Z]+/, '')) % CITING_SHARDS;
+// Works known only from Crossref (record_source "crossref") have no yearly citations, FWCI, topics or affiliations.
+export const crossrefOnly = work => work?.record_source === 'crossref';
 // Compact citing-work rows: [id, doi, title, year, date, type, source, authors, author_count, oa, url].
 export const CITING_FIELDS = ['id', 'doi', 'title', 'year', 'date', 'type', 'source', 'authors', 'author_count', 'oa', 'url'];
 // 'all' is the union of the institution's scopes; audit candidates are never part of it.
@@ -94,7 +97,7 @@ export const METRIC_KINDS = ['four_year', 'two_year', 'fwci'];
 export function citationMetricMember(work, entities, filter, snapshotYear) {
     const year = Number(filter.metricYear), kind = filter.metricKind;
     if (!METRIC_KINDS.includes(kind) || !['numerator', 'denominator'].includes(filter.metricPart) ||
-        !Number.isInteger(year) || year < snapshotYear - 6 || year > snapshotYear || !Number.isInteger(work.year)) return false;
+        !Number.isInteger(year) || year < snapshotYear - 6 || year > snapshotYear || !Number.isInteger(work.year) || crossrefOnly(work)) return false;
     if (filter.journal && (entities.sources[filter.journal]?.type !== 'journal' || !entities.sources[filter.journal]?.home_publisher ||
         work.source !== filter.journal || !work.scopes.includes('published'))) return false;
     const window = journalWindow(kind, year);
@@ -109,6 +112,8 @@ export function metricDrill(year, kind, part, journal = '') {
 export const snapshotYearOf = manifest => Number(new Intl.DateTimeFormat('en', { timeZone: INSTITUTION.timezone, year: 'numeric' }).format(new Date(manifest.updated_at)));
 // Four-year (CiteScore-style), two-year (JIF-style) and FWCI-mean series for any set of works.
 export function citationRatioSeries(works, years, snapshotYear, { breakdown = true, fwci = true } = {}) {
+    // Crossref-only works carry no citations per year; counting them as documents would lower every ratio.
+    works = works.filter(w => !crossrefOnly(w));
     const series = { four_year: [], two_year: [] };
     for (const kind of ['four_year', 'two_year']) for (const year of years) {
         const window = journalWindow(kind, year), groups = new Map();
@@ -154,6 +159,7 @@ export function citationRatioSeries(works, years, snapshotYear, { breakdown = tr
 // Citations a journal receives per citation year, plus three-year totals ending at each metric year:
 // all citations in the window, and citations in the window to works published in the same window.
 export function journalCitationHistory(works, snapshotYear, metricYears) {
+    works = works.filter(w => !crossrefOnly(w));
     const from = snapshotYear - 9, byYear = new Map(Array.from({ length: 10 }, (_, i) => [from + i, 0]));
     for (const work of works) for (const [year, count] of work.citation_years)
         if (byYear.has(year)) byYear.set(year, byYear.get(year) + count);
@@ -173,7 +179,10 @@ export function buildJournalMetrics(works, entities, manifest) {
     const years = Array.from({ length: 7 }, (_, i) => snapshotYear - 6 + i);
     const journals = Object.entries(entities.sources).filter(([, s]) => s.home_publisher && s.type === 'journal')
         .map(([id, source]) => ({ id, name: source.name || id, issn: source.issn || [], doaj: typeof source.doaj === 'boolean' ? source.doaj : null,
-            apc_usd: validNumber(source.apc_usd) ? source.apc_usd : null, works: [] }));
+            apc_usd: validNumber(source.apc_usd) ? source.apc_usd : null,
+            // How the journal joined: the ROR's publisher in OpenAlex, or the organisation's DOI prefix.
+            inclusion: ['doi_prefix', 'crossref'].includes(source.inclusion) ? source.inclusion : 'publisher', prefix_share: validNumber(source.prefix_share) ? source.prefix_share : null,
+            issn_types: source.issn_types || {}, doi_coverage: source.doi_coverage || null, works: [] }));
     const byID = new Map(journals.map(j => [j.id, j])), seen = new Set();
     for (const work of works) {
         if (!work.id || seen.has(work.id)) throw new Error('Invalid or duplicate work ID in journal metrics.');
@@ -191,6 +200,7 @@ export function buildJournalMetrics(works, entities, manifest) {
     journals.sort((a, b) => a.name.localeCompare(b.name, 'id') || a.id.localeCompare(b.id));
     return { schema_version: 1, updated_at: manifest.updated_at, snapshot_year: snapshotYear, years,
         citation_history_from: snapshotYear - 9, citation_history_to: snapshotYear, policy: JOURNAL_METRIC_POLICY,
+        doi_prefixes: Array.isArray(manifest.doi_prefixes) ? manifest.doi_prefixes : [],
         defaults: { source: journals[0]?.id || '', year: defaultYear }, journals };
 }
 // Compact, precomputed data for the embeddable journal widget (one small file per journal).
@@ -213,7 +223,9 @@ export function journalWidgetData(journal, works, entities, manifest, dataset) {
         ...(r.publication_from !== undefined ? { publication_from: r.publication_from, publication_to: r.publication_to, citation_from: r.citation_from, citation_to: r.citation_to } : {}) });
     return { schema_version: 1, updated_at: manifest.updated_at, snapshot_year: currentYear, default_year: dataset.defaults.year, years: dataset.years,
         institution: { short_name: INSTITUTION.short_name, timezone: INSTITUTION.timezone },
-        journal: { id: journal.id, name: journal.name, issn: journal.issn, doaj: journal.doaj ?? null, apc_usd: journal.apc_usd ?? null },
+        journal: { id: journal.id, name: journal.name, issn: journal.issn, doaj: journal.doaj ?? null, apc_usd: journal.apc_usd ?? null,
+            inclusion: journal.inclusion || 'publisher', ...(journal.inclusion !== 'publisher' ? { doi_prefixes: dataset.doi_prefixes || [] } : {}),
+            issn_types: journal.issn_types || {}, doi_coverage: journal.doi_coverage || null },
         kpis: { publications: k.publications, citations: k.citations, oa: compact(k.oa, 2), international: compact(k.international, 2),
             fwci: compact(k.fwci), fwci_n: k.fwci_n, fwci_coverage: compact(k.fwci_coverage, 2), top10: k.top10, eligible: k.eligible },
         series: { four_year: journal.series.four_year.map(row), two_year: journal.series.two_year.map(row), fwci: journal.series.fwci.map(row) },
@@ -357,7 +369,7 @@ export function matches(work, filter, entities, year = new Date().getFullYear())
     const scope = filter.scope || 'affiliated';
     if (scope === 'all' ? !scopes.some(s => INSTITUTION_SCOPES.includes(s)) : !scopes.includes(scope))
         return false;
-    if ((filter.corpus || 'core') === 'core' && work.xpac)
+    if ((filter.corpus || 'core') === 'core' && (work.xpac || crossrefOnly(work)))
         return false;
     if (filter.dateQuality === 'valid' && growthExclusion(work, year))
         return false;
@@ -536,7 +548,7 @@ export function normalizedAnnualFWCI(works, yearRows, filter, currentYear) {
 export function annualCitationDistribution(works, filter, currentYear) {
     const byYear = new Map();
     for (const work of works) {
-        if (growthExclusion(work, currentYear) || !validNumber(work.citations) || work.citations < 0) continue;
+        if (growthExclusion(work, currentYear) || crossrefOnly(work) || !validNumber(work.citations) || work.citations < 0) continue;
         if (!byYear.has(work.year)) byYear.set(work.year, []);
         byYear.get(work.year).push(work.citations);
     }
@@ -833,7 +845,7 @@ export function summarize(works, entities, filter, manifest, history = [], table
     const last = maps.years.get(String(completeYear))?.count || 0, prior = maps.years.get(String(completeYear - 1))?.count || 0;
     const publicationRows = [...selected].sort((a, b) => b.citations - a.citations || String(b.date).localeCompare(String(a.date))).slice(0, 50).map(w => ({
         id: w.id, title: w.title, doi: w.doi, year: w.year, citations: w.citations, oa_status: w.oa_status,
-        source_name: name('sources', w.source), scope: w.scopes, retracted: w.retracted,
+        source_name: name('sources', w.source), scope: w.scopes, retracted: w.retracted, record_source: w.record_source || 'openalex',
         journal_citations: filter.metricKind ? journalContribution(w, filter.metricKind, Number(filter.metricYear)) : undefined,
     }));
     const histogram = BINS.map(([min, max, label], index) => ({ id: String(index), name: label, count: selected.filter(w => w.citations >= min && w.citations <= max).length }));
@@ -879,7 +891,7 @@ export function summarize(works, entities, filter, manifest, history = [], table
             ? citationRatioSeries(filteredWorks(works, withoutPeriod(filter), entities, currentYear), [Number(filter.metricYear)], currentYear, { breakdown: false, fwci: false })[filter.metricKind][0] : null,
         audit_candidates: works.filter(w => w.scopes.includes('audit') && !w.scopes.includes('affiliated') &&
             (!filter.from || w.year >= Number(filter.from)) && (!filter.to || w.year <= Number(filter.to)) &&
-            (filter.corpus !== 'core' || !w.xpac)).slice(0, 50).map(w => ({ id: w.id, title: w.title, year: w.year, doi: w.doi })),
+            (filter.corpus !== 'core' || !w.xpac && !crossrefOnly(w))).slice(0, 50).map(w => ({ id: w.id, title: w.title, year: w.year, doi: w.doi })),
     };
 }
 function makeNetworks(works, entities, partnerRows, funderRows) {

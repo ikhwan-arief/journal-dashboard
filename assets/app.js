@@ -289,6 +289,8 @@ function pubTable(container, rows = data.publications, total = data.total, { can
                 title.append(el('span', { class: 'work-source' }, row.source_name));
             if (row.retracted)
                 title.append(el('span', { class: 'warning-tag' }, 'Retraction flag · check the context'));
+            if (row.record_source === 'crossref')
+                title.append(el('span', { class: 'source-tag', title: 'Registered under the DOI prefix at Crossref but not found in OpenAlex: no FWCI, topics, SDGs or affiliations.' }, 'Crossref only'));
             const access = el('td');
             access.append(el('span', { class: `oa-tag ${row.oa_status === 'closed' ? 'closed' : ''}` }, row.oa_status || 'Audit candidate'));
             tr.append(title, el('td', { class: 'num' }, row.year || '—'));
@@ -1063,7 +1065,9 @@ async function citingFor(id) {
     if (!entry) return { status: info.status, retrieved_at: info.retrieved_at, rows: [] };
     if (!citingCache.has(path)) citingCache.set(path, getJSON(path).catch(error => { citingCache.delete(path); throw error; }));
     const shard = await citingCache.get(path);
-    return { status: shard.status, retrieved_at: shard.retrieved_at, rows: (shard.cited[id] || []).map(i => Object.fromEntries(CITING_FIELDS.map((f, j) => [f, shard.works[i][j]]))) };
+    const via = shard.via?.[id] || [];
+    return { status: shard.status, retrieved_at: shard.retrieved_at, sources: info.sources || ['openalex'],
+        rows: (shard.cited[id] || []).map((i, k) => ({ ...Object.fromEntries(CITING_FIELDS.map((f, j) => [f, shard.works[i][j]])), via: ['OpenAlex', 'Crossref', 'OpenAlex and Crossref'][via[k] ?? 0] })) };
 }
 async function loadCiting(w, panel, tab, token) {
     panel.replaceChildren(el('p', { 'aria-live': 'polite' }, 'Loading citing works…'));
@@ -1081,9 +1085,11 @@ async function loadCiting(w, panel, tab, token) {
 }
 function renderCiting(panel, w, result) {
     const rows = result.rows, counts = el('div', { class: 'detail-grid' });
-    for (const [label, value] of [['Cumulative citations (OpenAlex)', num(w.citations)], ['Citing works identified', num(rows.length)], ['Relation source', 'OpenAlex']]) { const c = el('div'); c.append(el('small', {}, label), el('span', {}, value)); counts.append(c); }
+    const bySource = s => rows.filter(r => r.via === s).length;
+    const sourceText = (result.sources || []).includes('crossref') ? `OpenAlex ${num(bySource('OpenAlex'))} · Crossref ${num(bySource('Crossref'))} · both ${num(bySource('OpenAlex and Crossref'))}` : 'OpenAlex';
+    for (const [label, value] of [['Cumulative citations (OpenAlex)', num(w.citations)], ['Citing works identified', num(rows.length)], ['Relation source', sourceText]]) { const c = el('div'); c.append(el('small', {}, label), el('span', {}, value)); counts.append(c); }
     const status = result.status === 'stale' ? 'Citing data from the previous retrieval because the latest refresh failed' : result.status === 'sample' ? 'Test sample, not complete' : 'Complete for this snapshot';
-    panel.replaceChildren(counts, el('p', { class: 'panel-note' }, `${status} · retrieved ${result.retrieved_at ? formatDate(result.retrieved_at) : 'date not recorded'}. A relation is recorded only when the citing work's reference list in OpenAlex contains this work. The number of citing works can differ from cumulative citations because of retrieval timing and reference matching. The publication year of a citing work is not the citation year in the Citations per year chart.`));
+    panel.replaceChildren(counts, el('p', { class: 'panel-note' }, `${status} · retrieved ${result.retrieved_at ? formatDate(result.retrieved_at) : 'date not recorded'}. A relation is recorded only when the citing work's reference list contains this work: in OpenAlex, or in the references deposited at Crossref (Cited-by, for DOIs under the organisation's prefix). The number of citing works can differ from cumulative citations because of retrieval timing and reference matching. The publication year of a citing work is not the citation year in the Citations per year chart.`));
     // Distinguish "no citations", "not in the local sample" and "cited but no citing work proven by a reference list".
     if (!rows.length) {
         const message = !w.citations ? 'This work has no citations in the current data.'
@@ -1112,7 +1118,7 @@ function renderCiting(panel, w, result) {
             const link = safeURL(r.url) ? external('Open ↗', r.url) : safeURL(r.doi) ? external('DOI ↗', r.doi) : el('span', {}, 'Not available');
             const tr = el('tr', { 'data-citing-id': r.id });
             tr.append(el('td', { class: 'num' }, r.year ?? '—'), el('td', {}, r.title || 'Title not available'), el('td', {}, r.source || 'Not available'),
-                el('td', {}, authors), el('td', {}, r.type || 'Not available'), el('td', {}, 'OpenAlex'));
+                el('td', {}, authors), el('td', {}, r.type || 'Not available'), el('td', {}, r.via || 'OpenAlex'));
             // el() takes text only, so the link element is appended to its cell.
             const cell = el('td'); cell.append(link); tr.append(cell);
             body.append(tr);
@@ -1145,6 +1151,8 @@ async function openWork(id) {
         if (w.retracted)
             body.append(el('p', { class: 'notice error' }, 'The metadata carries a retraction flag. Check the source and context before using this work.'));
         body.append(el('p', {}, `${w.source_name || 'Unknown source'} · ${w.year || 'Unknown year'} · ${w.type}`));
+        if (w.record_source === 'crossref')
+            body.append(el('p', { class: 'notice' }, 'Known only from Crossref (DOI registered under the organisation\'s prefix, not found in OpenAlex). Citations are Crossref\'s count; FWCI, topics, SDGs, funders and author affiliations are not available for this record.'));
         const { panel, citingPanel, citingTab } = workTabs(body);
         loadCiting(w, citingPanel, citingTab, token);
         const details = el('div', { class: 'detail-grid' });
@@ -1186,7 +1194,7 @@ async function openWork(id) {
         if (w.apc_list || w.apc_paid)
             panel.append(el('p', {}, `List APC: ${w.apc_list?.value_usd === undefined ? 'Not available' : 'US$ ' + decimal(w.apc_list.value_usd)}. Estimated payment: ${w.apc_paid?.value_usd === undefined ? 'Not available' : 'US$ ' + decimal(w.apc_paid.value_usd)}. Provenance: ${w.apc_paid?.provenance || 'Not available'}. Not actual ${home()} spending.`));
         const links = el('div', { class: 'detail-links' });
-        for (const [label, url] of [['OpenAlex ↗', 'https://openalex.org/' + w.id], ['DOI ↗', w.doi], ['Open copy ↗', w.oa_url]])
+        for (const [label, url] of [[w.record_source === 'crossref' ? 'Crossref ↗' : 'OpenAlex ↗', w.record_source === 'crossref' ? 'https://api.crossref.org/works/' + encodeURIComponent(String(w.doi || '').replace('https://doi.org/', '')) : 'https://openalex.org/' + w.id], ['DOI ↗', w.doi], ['Open copy ↗', w.oa_url]])
             if (safeURL(url)) {
                 const a = external(label, url);
                 a.classList.add('button', 'secondary');

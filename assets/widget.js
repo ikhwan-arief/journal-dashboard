@@ -38,7 +38,8 @@
         distFwciNote: (min) => `Spread of FWCI scores of the journal's works per publication year. A few highly cited works can lift the mean; the median and box show where most works are. Years with fewer than ${min} works show one dot per work.`,
         distCitationsNote: (min) => `Cumulative citations per work as of the snapshot. Older works have had more time to be cited, so recent years sit lower. Years with fewer than ${min} works show one dot per work.`,
         distTip: (y, d) => `${y} · median ${dec(d.median)} · mean ${dec(d.mean)} · P25–P75 ${dec(d.q1)}–${dec(d.q3)} · P10–P90 ${dec(d.p10)}–${dec(d.p90)} · max ${dec(d.max)} · ${num(d.n)} works${d.small ? ' · small base' : ''}`,
-        storyTitle: 'How to read this chart',
+        storyTitle: 'How to read this chart', viaPrefix: p => `Included via DOI prefix ${p}`,
+        coverage: (all, oa, only, dup) => `DOIs at Crossref ${all} · in OpenAlex ${oa}${dup ? ` · duplicate registrations ${dup}` : ''} · Crossref only ${only}`,
         originTitle: 'Author affiliation', allYears: n => `All years · ${n} authorships`, authorships: ' authorships',
         originGroups: (h, country) => [`${h.endsWith('s') ? h + "'" : h + "'s"} authors`, `Other authors from ${country}`, 'International authors', 'Affiliation not recorded'],
         originGroupNote: (h, country) => `Each author of each work counts once, in one group: ${h} first, then another institution in ${country}, then an institution abroad (all countries together). Authors without an affiliation or country in OpenAlex are shown as not recorded.`,
@@ -367,7 +368,9 @@
         // Content protection inside the widget only: no context menu (copy/save image), copying, cutting or dragging.
         // The host OJS page outside the widget is left untouched; links, tooltips and the year picker keep working.
         for (const type of ['contextmenu', 'copy', 'cut', 'dragstart', 'selectstart']) root.addEventListener(type, event => event.preventDefault());
-        const meta = [j.issn.length ? 'ISSN ' + j.issn.join(', ') : null, j.doaj === null ? null : `DOAJ: ${j.doaj ? S.yes : S.no}`, j.apc_usd === null ? null : S.apc(num(j.apc_usd))].filter(Boolean).join(' · ');
+        const issnTyped = j.issn.map(i => j.issn_types?.[i.toUpperCase()] ? `${i} (${j.issn_types[i.toUpperCase()]})` : i), c = j.doi_coverage;
+        const meta = [j.issn.length ? 'ISSN ' + issnTyped.join(', ') : null, j.inclusion === 'doi_prefix' && j.doi_prefixes?.length ? S.viaPrefix(j.doi_prefixes.join(', ')) : null,
+            c ? S.coverage(num(c.crossref_dois), num(c.in_openalex), num(c.crossref_only), c.duplicate_dois ? num(c.duplicate_dois) : '') : null, j.doaj === null ? null : `DOAJ: ${j.doaj ? S.yes : S.no}`, j.apc_usd === null ? null : S.apc(num(j.apc_usd))].filter(Boolean).join(' · ');
         root.append(el('p', { class: 'uam-note' }, `${meta ? meta + ' · ' : ''}${S.updated(new Intl.DateTimeFormat(S.locale, { dateStyle: 'long', timeZone: data.institution?.timezone || 'UTC' }).format(new Date(data.updated_at)))}`));
         const kpis = el('div', { class: 'uam-grid uam-kpis' }), [kp, kc, ko, ki, kf, kt] = S.kpis;
         for (const [label, value, note] of [[kp[0], num(k.publications), kp[1]], [kc[0], num(k.citations), kc[1]], [ko[0], pct(k.oa), ko[1]],

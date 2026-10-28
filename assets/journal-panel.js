@@ -205,11 +205,32 @@ export function renderJournalRecap(container, dataset, filter, onYear) {
 }
 
 // Journal page header and metric panel: data from journal-metrics.json for this journal only.
+// A journal joins through the ROR's publisher in OpenAlex or, when OpenAlex files it elsewhere, through the
+// organisation's DOI prefix; the second case is stated on the page.
+// ISSNs with their Crossref type, e.g. "2442-5230 (electronic), 0126-2092 (print)".
+export function issnText(journal) {
+    const types = journal.issn_types || {};
+    return journal.issn.map(i => types[i.toUpperCase()] ? `${i} (${types[i.toUpperCase()]})` : i).join(', ');
+}
+// DOI coverage of the journal against Crossref: registered DOIs, found in OpenAlex, known only from Crossref.
+export function coverageText(journal) {
+    const c = journal.doi_coverage;
+    if (!c) return '';
+    const n = v => new Intl.NumberFormat('en-US').format(v || 0);
+    return `DOIs at Crossref: ${n(c.crossref_dois)} · in OpenAlex: ${n(c.in_openalex)}${c.duplicate_dois ? ` · duplicate DOI registrations of works already listed: ${n(c.duplicate_dois)}` : ''} · Crossref only: ${n(c.crossref_only)}${c.openalex_not_in_crossref ? ` · prefix DOIs in OpenAlex but not listed at Crossref: ${n(c.openalex_not_in_crossref)}` : ''} · `;
+}
+export function inclusionText(dataset, journal) {
+    if (journal.inclusion === 'crossref') return `Known only from Crossref under DOI prefix ${(dataset.doi_prefixes || []).join(', ')}; not found in OpenAlex · `;
+    if (journal.inclusion !== 'doi_prefix') return '';
+    const prefixes = (dataset.doi_prefixes || []).join(', ') || 'the organisation\'s DOI prefix';
+    const share = Number.isFinite(journal.prefix_share) ? ` (${Math.round(journal.prefix_share * 100)}% of its DOI works)` : '';
+    return `Included via DOI prefix ${prefixes}${share}; OpenAlex lists it under another or no publisher · `;
+}
 export function renderJournalHeader(container, dataset, journal, onBack) {
     const header = el('section', { class: 'journal-page-head' }), back = el('button', { class: 'button secondary', type: 'button' }, `← All ${home()} journals`);
     back.onclick = onBack;
     header.append(back, el('h2', { id: 'journal-page-title' }, journal.name),
-        el('p', { class: 'panel-note' }, `${journal.issn.length ? 'ISSN ' + journal.issn.join(', ') + ' · ' : ''}Journal page: KPIs, metrics, charts and the article list hold only works published in this journal (every affiliation, full collected corpus). Data updated: ${updated(dataset.updated_at)}.`));
+        el('p', { class: 'panel-note' }, `${journal.issn.length ? 'ISSN ' + issnText(journal) + ' · ' : ''}${inclusionText(dataset, journal)}${coverageText(journal)}Journal page: KPIs, metrics, charts and the article list hold only works published in this journal (every affiliation, full collected corpus). Data updated: ${updated(dataset.updated_at)}.`));
     container.append(header);
     return header;
 }
