@@ -5,7 +5,8 @@
 import { MODULES, SDGS, SDG_COLORS, METRIC_KINDS, INSTITUTION, configureInstitution, languageName, csvCell, filterQuery, metricDrill, journalWindow, snapshotYearOf, withoutPeriod, workSdgs, citingShard, CITING_FIELDS, distributionStory, ORIGIN_GROUPS } from './metrics.js';
 import { renderImpactMetrics, renderJournalRecap, renderJournalHeader, renderAuthorHeader, renderJournalMetrics, renderJournalCitations, renderJournalTable, journalEmbedURL, journalWidgetInstall, METRIC_TITLES, metricYear } from './journal-panel.js';
 import { EXPORT_CONTROLS, SHOW_AUDIT_TAB, CONTENT_PROTECTION } from './config.js';
-import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, dots, smallMultiples, countryBubbleMap, destroyCharts, boxPlot, percentileBand, chartStory, shareBar, ORIGIN_COLORS, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
+import { vosviewerFiles } from './sciencemap.js';
+import { el, panel, bar, line, donut, stacked, scatter, heatmap, treemap, network, scienceMap, fundingFlow, dots, smallMultiples, countryBubbleMap, destroyCharts, boxPlot, percentileBand, chartStory, shareBar, ORIGIN_COLORS, downloadText, PALETTE, applyTheme, sdgBars } from './charts.js';
 const sdgColor = id => SDG_COLORS[Number(id) - 1] || PALETTE[0];
 const $ = id => document.getElementById(id), nf = new Intl.NumberFormat('en-US'), df = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const num = n => n === null || n === undefined ? 'Not available' : nf.format(n);
@@ -145,6 +146,34 @@ async function getSummary() { if (isDefault()) {
     return overviewCache.get(scope);
 } return task('summary', { ratios: currentModule === 'citations' }); }
 function option(select, value, label) { select.append(el('option', { value }, label)); }
+// Panel with a VOSviewer-style map. controls: elements or [label, input] pairs; settings() gives the worker options; unit names the nodes.
+function mapPanel(grid, title, note, action, controls, settings, unit, onClick) {
+    const net = panel(grid, title, note, true), toolbar = el('div', { class: 'map-controls' }), view = el('select', { 'aria-label': 'Map view' }), size = el('select', { 'aria-label': `Maximum number of ${unit}` });
+    for (const [v, l] of [['network', 'Network (clusters)'], ['overlay', 'Overlay (year)'], ['density', 'Density']]) option(view, v, l);
+    for (const v of [100, 200, 300]) option(size, String(v), `${v} ${unit}`);
+    size.value = '300';
+    const inputs = [];
+    for (const c of controls) { if (Array.isArray(c)) { const label = el('label', {}, c[0]); label.append(c[1]); toolbar.append(label); inputs.push(c[1]); } else { toolbar.append(c); inputs.push(c); } }
+    toolbar.append(view, size);
+    net.actions.append(toolbar);
+    let request = 0, current = null;
+    const render = () => {
+        net.actions.querySelectorAll('.chart-export').forEach(b => b.remove()); net.node.querySelector('.chart-data')?.remove();
+        scienceMap(net, current, { view: view.value, onClick, files: current.nodes.length ? vosviewerFiles(current) : null });
+        const s = current.stats;
+        if (current.nodes.length) net.body.append(el('p', { class: 'map-note' }, `${num(s.nodes)} ${unit} and ${num(s.shown_links)} of ${num(s.total_links)} links shown (largest connected set). ${num(s.outside_largest_set)} selected ${unit} fall outside it; ${num(s.linked_works)} ${unit} in the filter have at least one link.`));
+    };
+    const draw = async () => {
+        const mine = ++request;
+        net.body.replaceChildren(el('div', { class: 'empty-state' }, 'Calculating the map…'));
+        const result = await task(action, { ...settings(), maxNodes: Number(size.value) });
+        if (mine !== request) return;
+        current = result; render();
+    };
+    for (const input of [...inputs, size]) input.onchange = draw;
+    view.onchange = () => current && render();
+    draw();
+}
 async function getJournalDataset() {
     if (!manifest.files.journal_metrics) return null;
     if (!journalDatasetPromise) journalDatasetPromise = getJSON(manifest.files.journal_metrics.path).then(result => {
@@ -587,21 +616,25 @@ function render() {
         line(panel(grid, 'Citations by year received', 'Counts from counts_by_year; the available window is limited, not the full history.'), data.citation_years.map(([year, count]) => ({ year, count })), { label: 'Citations observed',unit:'citations' });
         scatter(panel(grid, 'Work age and citations', 'At most the 250 most cited works; age is counted from the snapshot year.'), data.scatter, { x: 'age', y: 'citations', xTitle: 'Work age (years)', onClick: r => openWork(r.id) });
         bar(panel(grid, 'Normalised impact groups', `Percentile coverage: ${num(k.eligible)} works · ${pct(k.percentile_coverage)}.`), k.eligible ? [{ id: 'top1', name: 'Top 1%', count: k.top1 }, { id: 'top10', name: 'Top 10% (includes top 1%)', count: k.top10 }] : [], { limit: 2, onClick: r => drill({ metric: r.id }) });
-        const net = panel(grid, filter.scope === 'affiliated' ? `Links between ${home()} works` : 'Links between the selected works', 'A subset of at most the 40 most cited works; links are observed references.', true);
-        const select = el('select', { 'aria-label': 'Citation network type' });
-        for (const [v, l] of [['citations', 'Direct citation'], ['coupling', 'Bibliographic coupling'], ['cocitation', 'Co-citation']])
-            option(select, v, l);
-        net.actions.append(select);
-        const draw = () => { net.body.replaceChildren(); net.node.querySelector('.chart-data')?.remove(); net.actions.querySelector('.chart-export')?.remove(); network(net, data.networks[select.value], r => openWork(r.id)); };
-        select.onchange = draw;
-        draw();
+        // Citation map in the manner of VOSviewer, computed in the worker for the active filter.
+        const kind = el('select', { 'aria-label': 'Link type' });
+        for (const [v, l] of [['coupling', 'Bibliographic coupling'], ['direct', 'Direct citation'], ['cocitation', 'Co-citation']]) option(kind, v, l);
+        const minimum = el('input', { type: 'number', min: 0, max: 500, value: 0, 'aria-label': 'Minimum citations' });
+        mapPanel(grid, filter.scope === 'affiliated' ? `Links between ${home()} works` : 'Links between the selected works',
+            'Map of the most strongly linked works: association-strength normalisation, VOS layout and modularity clusters. Links are observed references in the source metadata.',
+            'sciencemap', [kind, ['Min. citations', minimum]], () => ({ kind: kind.value, minCitations: Number(minimum.value) || 0 }), 'works', r => openWork(r.id));
         minis(content, [['Median citations', decimal(k.median_citations), 'Little affected by outliers'], ['Scope h-index', num(k.h_index), 'Only the active set of works'], ['Mean citations', decimal(data.total ? k.citations / data.total : null), 'Cumulative citations per work'], ['FWCI coverage', pct(k.fwci_coverage), 'Missing values are left out of the mean']]);
     }
     else if (currentModule === 'collaboration') {
         scatter(panel(grid, 'Partner countries', `Countries other than ${homeCountry()}; one work can count for several countries.`), data.top.countries.filter(r => r.id !== INSTITUTION.country_code), { bubble: true, onClick: r => drill({ country: r.id }) });
         groupBar(grid, 'Connected institutions', 'partners', 'partner', 'Multiple affiliations can also form publication links.');
         collaborationMap(grid);
-        network(panel(grid, 'Institutional collaboration network', 'Lines show co-authored works; they are not evidence of a formal agreement.', true), data.networks.partners, r => r.id !== INSTITUTION.id && drill({ partner: r.id }));
+        // Co-authorship map of institutions in the manner of VOSviewer; the home institution is optional because it is on every affiliated work.
+        const minWorks = el('input', { type: 'number', min: 1, max: 500, value: 2, 'aria-label': 'Minimum co-authored works' });
+        const withHome = el('input', { type: 'checkbox', 'aria-label': `Include ${home()}` });
+        mapPanel(grid, 'Institutional collaboration network', `Co-authorship map of institutions: a link counts works the two share. Association-strength normalisation, VOS layout and modularity clusters; ${home()} is left out unless included. Links are not evidence of a formal agreement.`,
+            'collabmap', [['Min. works', minWorks], [`Include ${home()}`, withHome]], () => ({ minWorks: Number(minWorks.value) || 1, includeHome: withHome.checked }), 'institutions',
+            r => r.id !== INSTITUTION.id && drill({ partner: r.id }));
         smallMultiples(panel(grid, 'Partners by publication year', 'Line charts for the top 10 partner institutions. Years that are zero for every partner shown are hidden, so the axis years may not be consecutive. This filters the display only; source data is not removed. The vertical scale is shared; one work can involve several partners.', true), data.top.partners, years(), (r, y) => drill({ partner: r.id, from: y, to: y }), { omitEmpty: true });
         line(panel(grid, 'International collaboration share', 'Percentage of works with more than one identified country.'), data.oa_years.map(y => ({ year: y.year, count: y.total ? y.international / y.total * 100 : null })), { percent: true });
         bar(panel(grid, 'Partner sectors', 'One work can cover more than one sector.'), data.top.sectors, { limit: 10 });
@@ -641,7 +674,22 @@ function render() {
         intro(content, hasScope('funded') ? `Use the Scope option to tell all works funded by ${home()} apart from the funders of works affiliated with ${home()}. Missing funding metadata does not mean the research was unfunded.` : `OpenAlex lists no funder record for ${home()}, so this tab shows the funders recorded on works in the active scope. Missing funding metadata does not mean the research was unfunded.`);
         // Recorded funders and the funder-topic network sit side by side; the yearly lines span the row below.
         groupBar(grid, 'Recorded funders', 'funders', 'funder');
-        network(panel(grid, 'Funders and research topics', 'Links show a funder and a topic on the same work.'), data.networks.funding, r => drill(r.id.startsWith('F') ? { funder: r.id } : { topic: r.id }));
+        // Funding flows: Sankey (or heatmap) from the top funders to fields or topics; click opens the works behind a band, a cell or a node.
+        const flowPanel = panel(grid, 'Funders and research topics', 'Band width = works with both the funder and the field (or topic). A work with several funders counts once for each. Only works with funder metadata appear; missing funding metadata does not mean the research was unfunded.', true);
+        const flowBy = el('select', { 'aria-label': 'Right side' }), flowView = el('select', { 'aria-label': 'Funding view' }), flowBar = el('div', { class: 'map-controls' });
+        for (const [v, l] of [['field', 'By field'], ['topic', 'By topic']]) option(flowBy, v, l);
+        for (const [v, l] of [['sankey', 'Sankey'], ['heatmap', 'Heatmap']]) option(flowView, v, l);
+        flowBar.append(flowBy, flowView); flowPanel.actions.append(flowBar);
+        let flowRequest = 0, flow = null;
+        const flowRender = () => {
+            flowPanel.actions.querySelectorAll('.chart-export').forEach(b => b.remove()); flowPanel.node.querySelector('.chart-data')?.remove();
+            fundingFlow(flowPanel, flow, { view: flowView.value, onClick: ({ funder, target }) => drill({ ...(funder ? { funder } : {}), ...(target && target !== 'unknown' ? { [flow.by]: target } : {}) }) });
+            if (flow.funded) flowPanel.body.append(el('p', { class: 'map-note' }, `${num(flow.funded)} of ${num(flow.total)} works in the filter (${pct(flow.total ? flow.funded / flow.total * 100 : 0)}) record at least one funder; ${num(flow.funders)} funders in all. The top ${flow.sources.filter(s => s.id !== 'other').length} are shown separately.`));
+        };
+        const flowDraw = async () => { const mine = ++flowRequest; flowPanel.body.replaceChildren(el('div', { class: 'empty-state' }, 'Calculating…'));
+            const result = await task('fundingflow', { by: flowBy.value }); if (mine !== flowRequest) return; flow = result; flowRender(); };
+        flowBy.onchange = flowDraw; flowView.onchange = () => flow && flowRender();
+        flowDraw();
         smallMultiples(panel(grid, 'Funding by year', 'Line charts for the 10 funders with the most publications in the active scope. Years that are zero for every funder shown are hidden, so the axis years may not be consecutive. Source data stays intact. The vertical scale is shared; one work can have several funders.', true), data.top.funders, years(), (r, y) => drill({ funder: r.id, from: y, to: y }), { omitEmpty: true });
         minis(content, [['Works with a funder', num(data.total - data.quality.funder), 'Funding metadata completeness'], ['Awards identified', num(data.top.awards.length), 'At most 50 in the summary'], ['List APC known', num(k.apc_n), 'List price, not institutional spending'], ['OpenAPC payments', num(k.paid_verified), 'Articles with OpenAPC provenance']]);
         intro(content, `Mean known list APC: ${k.apc_mean === null ? 'Not available' : 'US$ ' + decimal(k.apc_mean)}. ${num(k.paid_fallback)} estimated payment records use provenance other than OpenAPC. These are not summed as actual ${home()} spending.`);
@@ -1013,7 +1061,7 @@ function methodPanel(grid) {
         if (title === 'Normalised metrics') fwciHelp(box);
         p.body.append(box);
     }
-    p.node.append(el('p', { class: 'panel-note' }, `Snapshot ${manifest.updated_at}. ${manifest.authorships_refreshed_at?'Authorship metadata rechecked '+formatDate(manifest.authorships_refreshed_at)+'. ':''}OpenAlex metadata is CC0; document rights follow their original licenses. Networks are limited to 40 nodes and 150 links. Source: help.openalex.org.`));
+    p.node.append(el('p', { class: 'panel-note' }, `Snapshot ${manifest.updated_at}. ${manifest.authorships_refreshed_at?'Authorship metadata rechecked '+formatDate(manifest.authorships_refreshed_at)+'. ':''}OpenAlex metadata is CC0; document rights follow their original licenses. Network maps are limited to 300 nodes and 3,000 links. Source: help.openalex.org.`));
 }
 // Shared work detail: tabs "Details" and "Citing works" for every module that opens a work.
 let detailToken = 0;

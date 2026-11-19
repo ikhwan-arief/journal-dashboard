@@ -2049,3 +2049,133 @@ dialog p {
   color:#a6431b;
   vertical-align:1px
 }
+
+/* Citation and collaboration maps (VOSviewer style) and funding flows (Sankey/heatmap). */
+.chart-body.science-map {
+  position:relative;
+  height:auto
+}
+.chart-body.science-map svg.science-map-svg {
+  width:100%;
+  height:auto;
+  aspect-ratio:800/460;
+  overflow:hidden;
+  border:1px solid var(--border);
+  touch-action:none;
+  cursor:grab;
+  background:var(--white);
+  border-radius:8px
+}
+.science-map-svg:active {
+  cursor:grabbing
+}
+.science-map .network-node {
+  transition:opacity .15s cubic-bezier(.4,0,.2,1)
+}
+.map-tools {
+  position:absolute;
+  right:8px;
+  top:8px;
+  display:flex;
+  gap:4px;
+  z-index:2
+}
+.map-tool {
+  min-width:32px;
+  height:32px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--white);
+  color:var(--ink);
+  font-size:13px
+}
+.map-tool:hover {
+  border-color:var(--forest);
+  color:var(--forest)
+}
+.map-legend {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 16px;
+  margin-top:10px;
+  font-size:11px;
+  color:var(--muted)
+}
+.map-legend-item i {
+  display:inline-block;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  margin-right:6px;
+  vertical-align:-1px
+}
+.map-gradient {
+  display:inline-block;
+  width:120px;
+  height:10px;
+  border-radius:9999px;
+  background:linear-gradient(90deg,#F3E6C4,#183D34)
+}
+.map-controls {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center
+}
+.map-controls label {
+  font-size:11px;
+  color:var(--muted);
+  display:flex;
+  gap:4px;
+  align-items:center
+}
+.map-controls input {
+  width:56px
+}
+.map-controls select {
+  width:auto
+}
+.map-note {
+  font-size:11px;
+  color:var(--muted);
+  margin:6px 0 0
+}
+.chart-body.funding-flow {
+  height:auto
+}
+.chart-body.funding-flow svg.flow-svg {
+  width:100%;
+  height:auto;
+  overflow:visible
+}
+.flow-band {
+  cursor:pointer;
+  transition:fill-opacity .15s cubic-bezier(.4,0,.2,1)
+}
+.flow-band:hover,.flow-band:focus-visible {
+  fill-opacity:.7
+}
+.flow-matrix-wrap {
+  overflow:auto
+}
+.flow-matrix {
+  font-size:11px
+}
+.flow-matrix thead th {
+  white-space:normal;
+  min-width:72px;
+  vertical-align:bottom
+}
+.flow-matrix tbody th {
+  font-weight:500;
+  white-space:normal;
+  min-width:180px
+}
+.flow-cell {
+  width:100%;
+  min-height:28px;
+  border:0;
+  border-radius:4px;
+  color:var(--ink);
+  font-weight:600
+}
